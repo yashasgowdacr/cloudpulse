@@ -82,11 +82,11 @@ async function generateAndStoreRefreshToken(userId) {
  */
 function setRefreshTokenCookie(res, refreshToken) {
   res.cookie('cloudpulse_refresh_token', refreshToken, {
-    httpOnly: true,
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    httpOnly: true,
     path: '/api/auth',
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in ms
+    maxAge: 604800000
   });
 }
 
@@ -383,9 +383,9 @@ router.post('/logout', async (req, res) => {
     }
 
     res.clearCookie('cloudpulse_refresh_token', {
-      httpOnly: true,
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      httpOnly: true,
       path: '/api/auth'
     });
 
@@ -395,9 +395,9 @@ router.post('/logout', async (req, res) => {
   } catch (error) {
     console.error('[AUTH] Logout error:', error.message);
     res.clearCookie('cloudpulse_refresh_token', {
-      httpOnly: true,
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      httpOnly: true,
       path: '/api/auth'
     });
     return res.json({
