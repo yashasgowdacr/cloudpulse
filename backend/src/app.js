@@ -16,6 +16,7 @@ const azureConnectionsRouter = require('./routes/azureConnections');
 const optimizationPoliciesRouter = require('./routes/optimizationPolicies');
 const { authenticateToken, requireRole } = require('./middleware/auth');
 const { getAzureCredentialForUser } = require('./services/azureConnectionResolver');
+const { getPolicyForUser } = require('./services/optimizationPolicyService');
 const { getEncryptionKey } = require('./utils/crypto');
 const db = require('./db');
 
