@@ -31,6 +31,9 @@ try {
 
 const app = express();
 
+// Trust reverse proxy (Render, Vercel, Nginx) for rate-limiting & client IP detection
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(cookieParser());
 
@@ -45,7 +48,16 @@ const authRateLimiter = rateLimit({
   }
 });
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173').split(',');
+const defaultOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://cloudpulse-ochre.vercel.app'
+];
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : defaultOrigins;
 
 app.use(cors({
   origin: function (origin, callback) {
