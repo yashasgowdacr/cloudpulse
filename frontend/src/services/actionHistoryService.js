@@ -9,5 +9,10 @@ export const actionHistoryService = {
   async getActionsByVm(vmName) {
     const response = await api.get(`/api/actions/${encodeURIComponent(vmName)}`);
     return response.data;
+  },
+
+  async runOptimizationNow() {
+    const response = await api.post('/api/optimization/run-now');
+    return response.data;
   }
 };

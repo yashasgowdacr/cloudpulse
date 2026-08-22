@@ -13,12 +13,14 @@ import {
   ChevronDown,
   ChevronUp,
   Filter,
-  Info
+  Info,
+  Play
 } from 'lucide-react';
 
 const ActionHistory = () => {
   const [actions, setActions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState('');
 
   // Filtering states
@@ -53,6 +55,21 @@ const ActionHistory = () => {
       setLoading(false);
     }
   }, [searchVm]);
+
+  // Run Optimization Scan on demand
+  const handleRunScan = async () => {
+    setScanning(true);
+    setError('');
+    try {
+      await actionHistoryService.runOptimizationNow();
+      await fetchHistory();
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || 'Failed to run optimization scan.';
+      setError(msg);
+    } finally {
+      setScanning(false);
+    }
+  };
 
   useEffect(() => {
     fetchHistory();
@@ -108,10 +125,16 @@ const ActionHistory = () => {
           </p>
         </div>
 
-        <button className="btn btn-secondary" onClick={fetchHistory} disabled={loading}>
-          <RefreshCw size={16} className={loading ? 'spinner' : ''} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
-          <span>Refresh History</span>
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button className="btn btn-primary" onClick={handleRunScan} disabled={scanning || loading}>
+            <Play size={16} className={scanning ? 'spinner' : ''} style={scanning ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>{scanning ? 'Scanning Azure...' : 'Run Optimization Scan'}</span>
+          </button>
+          <button className="btn btn-secondary" onClick={fetchHistory} disabled={loading || scanning}>
+            <RefreshCw size={16} className={loading ? 'spinner' : ''} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>Refresh History</span>
+          </button>
+        </div>
       </div>
 
       {/* Simulation / Dry Run Banner */}

@@ -1075,6 +1075,80 @@ app.get('/api/actions/:vmName', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/api/optimization/run-now', authenticateToken, async (req, res) => {
+  try {
+    const userPolicy = await getPolicyForUser(req.user.id);
+    const connResult = await db.query(
+      `SELECT id, connection_name, subscription_id FROM azure_connections WHERE user_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC`,
+      [req.user.id]
+    );
+    const connections = connResult.rows;
+
+    if (connections.length === 0) {
+      return res.status(400).json({
+        error: 'NO_ACTIVE_CONNECTIONS',
+        message: 'No active Azure connections found for this user account.'
+      });
+    }
+
+    const shutdownOptions = {
+      threshold: userPolicy.idleCpuThreshold,
+      windowMinutes: userPolicy.monitoringWindowMinutes,
+      autoShutdown: userPolicy.autoShutdown
+    };
+
+    const results = [];
+
+    for (const conn of connections) {
+      const resolved = await getAzureCredentialForUser(req.user.id, conn.id);
+      const vms = await discoverAzureVms(resolved.subscriptionId, resolved.credential);
+
+      for (const vm of vms) {
+        if (!vm.resourceGroup || !vm.name) continue;
+
+        const state = (vm.status || '').toLowerCase();
+        if (state === 'stopped' || state === 'deallocated') {
+          const skipReason = `Optimization skipped: Virtual machine '${vm.name}' is already ${vm.status}.`;
+          await recordAction({
+            userId: req.user.id,
+            connectionId: conn.id,
+            vmName: vm.name,
+            action: 'DEALLOCATE',
+            status: 'SKIPPED',
+            dryRun: process.env.DRY_RUN !== 'false',
+            cpuAverage: null,
+            reason: skipReason
+          });
+          results.push({ vmName: vm.name, status: 'SKIPPED', reason: skipReason });
+          continue;
+        }
+
+        const resObj = await executeVmShutdown(
+          resolved.subscriptionId,
+          vm.resourceGroup,
+          vm.name,
+          shutdownOptions,
+          resolved.credential,
+          { userId: req.user.id, connectionId: conn.id }
+        );
+        results.push(resObj);
+      }
+    }
+
+    return res.json({
+      message: 'Optimization scan completed successfully.',
+      totalVmsEvaluated: results.length,
+      results
+    });
+  } catch (error) {
+    console.error('[MANUAL-OPTIMIZATION] Scan error:', error.message);
+    return res.status(500).json({
+      error: 'OPTIMIZATION_SCAN_FAILED',
+      message: error.message
+    });
+  }
+});
+
 const SCHEDULER_LOCK_ID = 987654321;
 
 async function runScheduledOptimization() {
