@@ -411,7 +411,9 @@ const VirtualMachines = () => {
                 {metrics.loading ? (
                   <div className="loading-center" style={{ minHeight: '60px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
                 ) : metrics.error ? (
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{metrics.error}</div>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                    {typeof metrics.error === 'string' ? metrics.error : (metrics.error?.message || 'CPU data unavailable')}
+                  </div>
                 ) : (
                   <div>
                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-primary)' }}>
@@ -434,7 +436,9 @@ const VirtualMachines = () => {
                 {price.loading ? (
                   <div className="loading-center" style={{ minHeight: '60px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
                 ) : price.error ? (
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{price.error}</div>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                    {typeof price.error === 'string' ? price.error : (price.error?.message || 'Pricing data unavailable')}
+                  </div>
                 ) : (
                   <div>
                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-primary)' }}>
@@ -458,7 +462,9 @@ const VirtualMachines = () => {
               {savings.loading ? (
                 <div className="loading-center" style={{ minHeight: '60px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
               ) : savings.error ? (
-                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{savings.error}</div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                  {typeof savings.error === 'string' ? savings.error : (savings.error?.message || 'Savings calculation unavailable')}
+                </div>
               ) : (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>

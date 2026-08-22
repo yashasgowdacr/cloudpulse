@@ -39,7 +39,7 @@ app.use(cookieParser());
 
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -1262,7 +1262,17 @@ app.get('/api/notifications/test', authenticateToken, requireRole('ADMIN'), asyn
   }
 });
 
+const costCache = new Map();
+
 async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential = null) {
+  const cacheKey = subscriptionId;
+  const cached = costCache.get(cacheKey);
+  const now = Date.now();
+
+  if (cached && (now - cached.timestamp < 60000)) {
+    return cached.data;
+  }
+
   const credential = customCredential || new DefaultAzureCredential();
   const costClient = new CostManagementClient(credential);
   const scope = `/subscriptions/${subscriptionId}`;
@@ -1281,28 +1291,38 @@ async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential
     }
   };
 
-  const result = await costClient.query.usage(scope, queryParameters);
+  try {
+    const result = await costClient.query.usage(scope, queryParameters);
 
-  let totalCost = 0;
-  let currency = 'USD';
+    let totalCost = 0;
+    let currency = 'INR';
 
-  if (result && result.rows && Array.isArray(result.rows) && result.rows.length > 0) {
-    const row = result.rows[0];
-    const costValue = parseFloat(row[0]);
-    if (!isNaN(costValue)) {
-      totalCost = Math.round(costValue * 100) / 100;
+    if (result && result.rows && Array.isArray(result.rows) && result.rows.length > 0) {
+      const row = result.rows[0];
+      const costValue = parseFloat(row[0]);
+      if (!isNaN(costValue)) {
+        totalCost = Math.round(costValue * 100) / 100;
+      }
+      if (row[1] && typeof row[1] === 'string') {
+        currency = row[1];
+      }
     }
-    if (row[1] && typeof row[1] === 'string') {
-      currency = row[1];
+
+    const data = {
+      totalCost,
+      currency: currency || 'INR',
+      timeframe: 'MonthToDate',
+      source: 'Azure Cost Management'
+    };
+
+    costCache.set(cacheKey, { timestamp: now, data });
+    return data;
+  } catch (err) {
+    if (cached) {
+      return cached.data;
     }
+    throw err;
   }
-
-  return {
-    totalCost,
-    currency,
-    timeframe: 'MonthToDate',
-    source: 'Azure Cost Management'
-  };
 }
 
 app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {

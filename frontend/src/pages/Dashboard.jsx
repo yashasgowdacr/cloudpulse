@@ -16,6 +16,13 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
+const safeErrString = (errVal, fallback = 'Error loading data') => {
+  if (!errVal) return '';
+  if (typeof errVal === 'string') return errVal;
+  if (typeof errVal === 'object') return errVal.message || errVal.error || fallback;
+  return String(errVal);
+};
+
 const Dashboard = () => {
   const { user } = useAuth();
 
@@ -35,7 +42,7 @@ const Dashboard = () => {
       const data = await dashboardService.getAzureConnections();
       setConnections({ loading: false, data, error: null });
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.response?.data?.message || 'Failed to load connections.';
+      const errMsg = safeErrString(err.response?.data?.message || err.response?.data?.error || err.message, 'Failed to load connections.');
       setConnections({ loading: false, data: null, error: errMsg });
     }
   }, []);
@@ -51,7 +58,7 @@ const Dashboard = () => {
       if (err.response?.data?.error === 'MULTIPLE_CONNECTIONS_REQUIRED' || err.response?.data?.message?.includes('Multiple')) {
         setVms({ loading: false, data: null, error: 'Multiple active Azure connections found. Select a specific connection to view VM data.', multiConnection: true });
       } else {
-        const errMsg = err.response?.data?.error || err.response?.data?.message || 'Unable to load VM data.';
+        const errMsg = safeErrString(err.response?.data?.message || err.response?.data?.error || err.message, 'Unable to load VM data.');
         setVms({ loading: false, data: null, error: errMsg, multiConnection: false });
       }
     }
@@ -64,7 +71,7 @@ const Dashboard = () => {
       const data = await dashboardService.getMonthToDateCost();
       setCost({ loading: false, data, error: null });
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.response?.data?.message || 'Unable to load cost data.';
+      const errMsg = safeErrString(err.response?.data?.message || err.response?.data?.error || err.message, 'Unable to load cost data.');
       setCost({ loading: false, data: null, error: errMsg });
     }
   }, []);
@@ -76,7 +83,7 @@ const Dashboard = () => {
       const data = await dashboardService.getOptimizationPolicy();
       setPolicy({ loading: false, data: data?.policy || null, error: null });
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.response?.data?.message || 'Unable to load policy.';
+      const errMsg = safeErrString(err.response?.data?.message || err.response?.data?.error || err.message, 'Unable to load policy.');
       setPolicy({ loading: false, data: null, error: errMsg });
     }
   }, []);
@@ -88,7 +95,7 @@ const Dashboard = () => {
       const data = await dashboardService.getActionHistory();
       setActions({ loading: false, data: data?.actions || [], error: null });
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.response?.data?.message || 'Unable to load action history.';
+      const errMsg = safeErrString(err.response?.data?.message || err.response?.data?.error || err.message, 'Unable to load action history.');
       setActions({ loading: false, data: null, error: errMsg });
     }
   }, []);
@@ -162,7 +169,7 @@ const Dashboard = () => {
             </div>
           ) : connections.error ? (
             <div style={{ color: 'var(--status-error)', fontSize: '0.875rem', marginBottom: '0.75rem' }}>
-              {connections.error}
+              {safeErrString(connections.error, 'Failed to load connections.')}
             </div>
           ) : activeConnCount > 0 ? (
             <>
@@ -208,7 +215,7 @@ const Dashboard = () => {
             </>
           ) : vms.error ? (
             <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              {vms.error}
+              {safeErrString(vms.error, 'Unable to load VM data.')}
             </div>
           ) : (
             <>
@@ -236,12 +243,12 @@ const Dashboard = () => {
             </div>
           ) : cost.error ? (
             <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              {cost.error}
+              {safeErrString(cost.error, 'Unable to load cost data.')}
             </div>
           ) : (
             <>
               <div style={{ fontSize: '1.75rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                ${(cost.data?.totalCost ?? cost.data?.amount) != null ? Number(cost.data?.totalCost ?? cost.data?.amount).toFixed(2) : '0.00'} {cost.data?.currency || 'USD'}
+                ₹{(cost.data?.totalCost ?? cost.data?.amount) != null ? Number(cost.data?.totalCost ?? cost.data?.amount).toFixed(2) : '0.00'} {cost.data?.currency || 'INR'}
               </div>
               <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                 Source: Azure Cost Management API
@@ -263,7 +270,7 @@ const Dashboard = () => {
             </div>
           ) : policy.error ? (
             <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              {policy.error}
+              {safeErrString(policy.error, 'Unable to load policy.')}
             </div>
           ) : (
             <>
@@ -303,7 +310,7 @@ const Dashboard = () => {
           </div>
         ) : actions.error ? (
           <div style={{ color: 'var(--status-error)', padding: '1rem', fontSize: '0.875rem' }}>
-            {actions.error}
+            {safeErrString(actions.error, 'Unable to load action history.')}
           </div>
         ) : (actions.data || []).length === 0 ? (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2.5rem 1rem', fontSize: '0.875rem' }}>
