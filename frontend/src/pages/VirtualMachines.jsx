@@ -491,14 +491,16 @@ const VirtualMachines = () => {
               {dryRun.loading ? (
                 <div className="loading-center" style={{ minHeight: '50px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
               ) : dryRun.error ? (
-                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{dryRun.error}</div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                  {typeof dryRun.error === 'string' ? dryRun.error : (dryRun.error?.message || 'Shutdown preview unavailable')}
+                </div>
               ) : (
                 <div>
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
                     CPU Avg: <strong>{(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage) != null ? `${Number(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage).toFixed(2)}%` : 'N/A'}</strong> | Threshold: <strong>{dryRun.data?.idleCpuThreshold ?? 5}%</strong>
                   </div>
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                    Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({dryRun.data?.reason || 'Evaluated'})
+                    Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({typeof dryRun.data?.reason === 'string' ? dryRun.data.reason : (dryRun.data?.reason?.reason || dryRun.data?.reason?.message || 'Evaluated')})
                   </div>
                 </div>
               )}
