@@ -563,7 +563,7 @@ async function getActions(userId, vmNameFilter = null) {
     query = `
       SELECT id, user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason, created_at
       FROM action_history
-      WHERE user_id = $1 AND LOWER(vm_name) = LOWER($2)
+      WHERE (user_id = $1 OR user_id IS NULL) AND LOWER(vm_name) = LOWER($2)
       ORDER BY created_at DESC
     `;
     values = [userId, vmNameFilter];
@@ -571,7 +571,7 @@ async function getActions(userId, vmNameFilter = null) {
     query = `
       SELECT id, user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason, created_at
       FROM action_history
-      WHERE user_id = $1
+      WHERE (user_id = $1 OR user_id IS NULL)
       ORDER BY created_at DESC
     `;
     values = [userId];
