@@ -45,7 +45,8 @@ const Dashboard = () => {
     setVms((prev) => ({ ...prev, loading: true, error: null, multiConnection: false }));
     try {
       const data = await dashboardService.getVirtualMachines();
-      setVms({ loading: false, data: Array.isArray(data) ? data : [], error: null, multiConnection: false });
+      const vmList = Array.isArray(data) ? data : (data?.vms || []);
+      setVms({ loading: false, data: vmList, error: null, multiConnection: false });
     } catch (err) {
       if (err.response?.data?.error === 'MULTIPLE_CONNECTIONS_REQUIRED' || err.response?.data?.message?.includes('Multiple')) {
         setVms({ loading: false, data: null, error: 'Multiple active Azure connections found. Select a specific connection to view VM data.', multiConnection: true });
@@ -240,7 +241,7 @@ const Dashboard = () => {
           ) : (
             <>
               <div style={{ fontSize: '1.75rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                ${cost.data?.amount != null ? Number(cost.data.amount).toFixed(2) : '0.00'} {cost.data?.currency || 'USD'}
+                ${(cost.data?.totalCost ?? cost.data?.amount) != null ? Number(cost.data?.totalCost ?? cost.data?.amount).toFixed(2) : '0.00'} {cost.data?.currency || 'USD'}
               </div>
               <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                 Source: Azure Cost Management API
