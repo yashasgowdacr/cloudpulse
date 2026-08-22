@@ -430,10 +430,10 @@ const VirtualMachines = () => {
                 ) : (
                   <div>
                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                      {metrics.data?.average != null ? `${Number(metrics.data.average).toFixed(2)}%` : 'N/A'}
+                      {(metrics.data?.averageCpuPercentage ?? metrics.data?.average) != null ? `${Number(metrics.data?.averageCpuPercentage ?? metrics.data?.average).toFixed(2)}%` : 'N/A'}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      {metrics.data?.dataPoints ?? 0} data points aggregated
+                      {metrics.data?.dataPointsCount ?? (Array.isArray(metrics.data?.dataPoints) ? metrics.data.dataPoints.length : (typeof metrics.data?.dataPoints === 'number' ? metrics.data.dataPoints : 0))} data points aggregated
                     </div>
                   </div>
                 )}
@@ -455,10 +455,10 @@ const VirtualMachines = () => {
                 ) : (
                   <div>
                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                      ${price.data?.hourlyPrice != null ? Number(price.data.hourlyPrice).toFixed(4) : '0.00'}/hr
+                      ₹{price.data?.hourlyPrice != null ? Number(price.data.hourlyPrice).toFixed(4) : '0.00'}/hr
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      Currency: {price.data?.currency || 'USD'}
+                      Currency: {price.data?.currency || 'INR'}
                     </div>
                   </div>
                 )}
@@ -482,7 +482,7 @@ const VirtualMachines = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--status-success)' }}>
-                      ${savings.data?.potentialHourlySavings != null ? Number(savings.data.potentialHourlySavings).toFixed(4) : '0.00'} / hr
+                      ₹{savings.data?.potentialHourlySavings != null ? Number(savings.data.potentialHourlySavings).toFixed(4) : '0.00'} / hr
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                       Calculated over {savings.data?.monitoringWindow || 'PT30M'} monitoring window
