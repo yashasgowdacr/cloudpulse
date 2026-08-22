@@ -20,6 +20,19 @@ import {
   Pause
 } from 'lucide-react';
 
+const safeText = (val, fallback = '') => {
+  if (val == null) return fallback;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (typeof val === 'object') {
+    if (typeof val.reason === 'string') return val.reason;
+    if (typeof val.message === 'string') return val.message;
+    if (typeof val.error === 'string') return val.error;
+    if (val.reason && typeof val.reason === 'object') return safeText(val.reason, fallback);
+  }
+  return fallback;
+};
+
 const VirtualMachines = () => {
   // Connection states
   const [connections, setConnections] = useState([]);
@@ -412,7 +425,7 @@ const VirtualMachines = () => {
                   <div className="loading-center" style={{ minHeight: '60px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
                 ) : metrics.error ? (
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                    {typeof metrics.error === 'string' ? metrics.error : (metrics.error?.message || 'CPU data unavailable')}
+                    {safeText(metrics.error, 'CPU data unavailable')}
                   </div>
                 ) : (
                   <div>
@@ -437,7 +450,7 @@ const VirtualMachines = () => {
                   <div className="loading-center" style={{ minHeight: '60px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
                 ) : price.error ? (
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                    {typeof price.error === 'string' ? price.error : (price.error?.message || 'Pricing data unavailable')}
+                    {safeText(price.error, 'Pricing data unavailable')}
                   </div>
                 ) : (
                   <div>
@@ -463,7 +476,7 @@ const VirtualMachines = () => {
                 <div className="loading-center" style={{ minHeight: '60px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
               ) : savings.error ? (
                 <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                  {typeof savings.error === 'string' ? savings.error : (savings.error?.message || 'Savings calculation unavailable')}
+                  {safeText(savings.error, 'Savings calculation unavailable')}
                 </div>
               ) : (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -498,7 +511,7 @@ const VirtualMachines = () => {
                 <div className="loading-center" style={{ minHeight: '50px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
               ) : dryRun.error ? (
                 <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                  {typeof dryRun.error === 'string' ? dryRun.error : (dryRun.error?.message || 'Shutdown preview unavailable')}
+                  {safeText(dryRun.error, 'Shutdown preview unavailable')}
                 </div>
               ) : (
                 <div>
@@ -506,7 +519,7 @@ const VirtualMachines = () => {
                     CPU Avg: <strong>{(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage) != null ? `${Number(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage).toFixed(2)}%` : 'N/A'}</strong> | Threshold: <strong>{dryRun.data?.idleCpuThreshold ?? 5}%</strong>
                   </div>
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                    Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({typeof dryRun.data?.reason === 'string' ? dryRun.data.reason : (dryRun.data?.reason?.reason || dryRun.data?.reason?.message || 'Evaluated')})
+                    Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({safeText(dryRun.data?.reason, 'Evaluated')})
                   </div>
                 </div>
               )}

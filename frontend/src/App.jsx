@@ -4,6 +4,7 @@ import AuthLayout from './layouts/AuthLayout';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -36,7 +37,7 @@ function App() {
 
       {/* Authenticated SaaS Routes */}
       <Route element={<ProtectedRoute />}>
-        <Route element={<MainLayout />}>
+        <Route element={<ErrorBoundary><MainLayout /></ErrorBoundary>}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/azure" element={<AzureConnections />} />
           <Route path="/vms" element={<VirtualMachines />} />
