@@ -388,13 +388,22 @@ const VirtualMachines = () => {
             borderRadius: 'var(--radius-lg)',
             width: '100%',
             maxWidth: '680px',
-            padding: '2rem',
             boxShadow: 'var(--shadow-lg)',
-            maxHeight: '90vh',
-            overflowY: 'auto'
+            maxHeight: '85vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
           }}>
-            {/* Modal Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+            {/* Modal Header (Fixed at top) */}
+            <div style={{
+              display: 'flex',
+              justify: 'space-between',
+              alignItems: 'center',
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid var(--border-color)',
+              backgroundColor: 'var(--bg-secondary)',
+              flexShrink: 0
+            }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <Server size={24} style={{ color: 'var(--accent-primary)' }} />
                 <div>
@@ -409,11 +418,14 @@ const VirtualMachines = () => {
 
               <button
                 onClick={() => setSelectedVm(null)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', borderRadius: '4px' }}
               >
                 <X size={20} />
               </button>
             </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div style={{ padding: '1.5rem', overflowY: 'auto', flex: 1 }}>
 
             {/* General Info Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', backgroundColor: 'var(--bg-primary)', padding: '1rem', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem' }}>
@@ -588,7 +600,8 @@ const VirtualMachines = () => {
             </div>
           </div>
         </div>
-      )}
+      </div>
+    )}
     </div>
   );
 };
