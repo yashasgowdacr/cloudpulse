@@ -948,27 +948,28 @@ app.get('/azure/vms/:resourceGroup/:vmName/policy', authenticateToken, async (re
 });
 
 app.get('/azure/vms/:resourceGroup/:vmName/shutdown/dry-run', authenticateToken, async (req, res) => {
-  const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
-
-  if (!subscriptionId) {
-    return res.status(500).json({
-      error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
-    });
-  }
-
+  const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const { windowMinutes, threshold, environment, autoShutdown } = parseQueryOptions(req.query);
 
   try {
+    const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
+
+    if (!resolved.subscriptionId) {
+      return res.status(500).json({
+        error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
+      });
+    }
+
     const timespan = `PT${windowMinutes}M`;
-    const metricsData = await fetchVmCpuMetrics(subscriptionId, resourceGroup, vmName, timespan);
+    const metricsData = await fetchVmCpuMetrics(resolved.subscriptionId, resourceGroup, vmName, timespan, resolved.credential);
     const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
     const policyResult = evaluateShutdownPolicy(vmName, idleStatus, environment, autoShutdown);
     const dryRunResult = evaluateDryRunShutdown(vmName, policyResult);
 
     recordAction({
       userId: req.user.id,
-      connectionId: req.query.connectionId || null,
+      connectionId: resolved.connectionId,
       vmName,
       action: 'DEALLOCATE',
       status: 'DRY_RUN',
@@ -979,6 +980,13 @@ app.get('/azure/vms/:resourceGroup/:vmName/shutdown/dry-run', authenticateToken,
 
     return res.json(dryRunResult);
   } catch (error) {
+    if (error.message && error.message.includes('Multiple active Azure connections found')) {
+      return res.status(400).json({
+        error: 'MULTIPLE_CONNECTIONS_REQUIRED',
+        message: error.message
+      });
+    }
+
     return res.status(500).json({
       error: `Failed to execute shutdown dry-run for VM '${vmName}' in resource group '${resourceGroup}'`,
       details: error.message
