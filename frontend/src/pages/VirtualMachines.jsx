@@ -469,8 +469,8 @@ const VirtualMachines = () => {
                       Calculated over {savings.data?.monitoringWindow || 'PT30M'} monitoring window
                     </div>
                   </div>
-                  <span className={`badge ${savings.data?.isIdle ? 'badge-success' : 'badge-warning'}`}>
-                    {savings.data?.isIdle ? 'Idle VM Detected' : 'Active / Non-Idle'}
+                  <span className={`badge ${(savings.data?.idle ?? savings.data?.isIdle) ? 'badge-success' : 'badge-warning'}`}>
+                    {(savings.data?.idle ?? savings.data?.isIdle) ? 'Idle VM Detected' : 'Active / Non-Idle'}
                   </span>
                 </div>
               )}
@@ -495,10 +495,10 @@ const VirtualMachines = () => {
               ) : (
                 <div>
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                    CPU Avg: <strong>{dryRun.data?.cpuAverage != null ? `${Number(dryRun.data.cpuAverage).toFixed(2)}%` : 'N/A'}</strong> | Threshold: <strong>{dryRun.data?.idleCpuThreshold ?? 5}%</strong>
+                    CPU Avg: <strong>{(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage) != null ? `${Number(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage).toFixed(2)}%` : 'N/A'}</strong> | Threshold: <strong>{dryRun.data?.idleCpuThreshold ?? 5}%</strong>
                   </div>
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                    Would Deallocate: <strong style={{ color: dryRun.data?.willDeallocate ? 'var(--status-success)' : 'var(--status-warning)' }}>{dryRun.data?.willDeallocate ? 'YES' : 'NO'}</strong> ({dryRun.data?.reason || 'Evaluated'})
+                    Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({dryRun.data?.reason || 'Evaluated'})
                   </div>
                 </div>
               )}

@@ -967,6 +967,8 @@ app.get('/azure/vms/:resourceGroup/:vmName/shutdown/dry-run', authenticateToken,
     const dryRunResult = evaluateDryRunShutdown(vmName, policyResult);
 
     recordAction({
+      userId: req.user.id,
+      connectionId: req.query.connectionId || null,
       vmName,
       action: 'DEALLOCATE',
       status: 'DRY_RUN',
