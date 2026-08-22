@@ -361,15 +361,20 @@ function evaluateShutdownPolicy(vmName, idleResult, environment = 'development',
 }
 
 function evaluateDryRunShutdown(vmName, policyResult) {
+  const isDryRun = process.env.DRY_RUN !== 'false';
   const wouldExecute = policyResult.allowed;
-  const reason = wouldExecute
-    ? `[DRY-RUN] Virtual machine '${vmName}' meets all policy requirements and WOULD be deallocated.`
-    : `[DRY-RUN] Virtual machine '${vmName}' deallocation WOULD NOT execute. Reason: ${policyResult.reason}`;
+  const reason = isDryRun
+    ? (wouldExecute
+        ? `[DRY-RUN] Virtual machine '${vmName}' meets all policy requirements and WOULD be deallocated.`
+        : `[DRY-RUN] Virtual machine '${vmName}' deallocation WOULD NOT execute. Reason: ${policyResult.reason}`)
+    : (wouldExecute
+        ? `[LIVE] Virtual machine '${vmName}' meets all policy requirements and WILL be deallocated live.`
+        : `[LIVE] Virtual machine '${vmName}' deallocation WILL NOT execute. Reason: ${policyResult.reason}`);
 
   return {
     vmName,
     action: 'DEALLOCATE',
-    dryRun: true,
+    dryRun: isDryRun,
     wouldExecute,
     idle: policyResult.idle,
     cpuAverage: policyResult.cpuAverage,
@@ -598,14 +603,32 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
   const connectionId = context.connectionId || options.connectionId || null;
   const isDryRun = process.env.DRY_RUN !== 'false';
 
-  const windowMinutes = options.windowMinutes || 30;
-  const timespan = options.timespan || `PT${windowMinutes}M`;
-  const threshold = options.threshold !== undefined ? options.threshold : 5;
-  const environment = options.environment || 'development';
-  const autoShutdown = options.autoShutdown !== undefined ? options.autoShutdown : true;
+  let environment = options.environment || 'development';
+  let autoShutdown = options.autoShutdown !== undefined ? options.autoShutdown : true;
 
   const credential = customCredential || new DefaultAzureCredential();
   const computeClient = new ComputeManagementClient(credential, subscriptionId);
+
+  // Auto-detect production environment from VM name or Azure tags
+  if (vmName.toLowerCase().includes('prod') || vmName.toLowerCase().includes('production')) {
+    environment = 'production';
+  }
+
+  try {
+    const vmResource = await computeClient.virtualMachines.get(resourceGroup, vmName);
+    if (vmResource && vmResource.tags) {
+      const envTag = vmResource.tags.Environment || vmResource.tags.environment || vmResource.tags.ENV || vmResource.tags.env;
+      if (envTag && envTag.toLowerCase() === 'production') {
+        environment = 'production';
+      }
+      const autoShutdownTag = vmResource.tags.AutoShutdown || vmResource.tags.autoshutdown;
+      if (autoShutdownTag && (autoShutdownTag.toLowerCase() === 'disabled' || autoShutdownTag.toLowerCase() === 'false')) {
+        autoShutdown = false;
+      }
+    }
+  } catch (tagErr) {
+    // Proceed if Azure tag query fails
+  }
 
   let instanceView;
   try {
@@ -962,19 +985,43 @@ app.get('/azure/vms/:resourceGroup/:vmName/shutdown/dry-run', authenticateToken,
       });
     }
 
+    let detectedEnv = environment || 'development';
+    let isAutoShutdownEnabled = autoShutdown !== undefined ? autoShutdown : true;
+
+    if (vmName.toLowerCase().includes('prod') || vmName.toLowerCase().includes('production')) {
+      detectedEnv = 'production';
+    }
+
+    const computeClient = new ComputeManagementClient(resolved.credential, resolved.subscriptionId);
+    try {
+      const vmResource = await computeClient.virtualMachines.get(resourceGroup, vmName);
+      if (vmResource && vmResource.tags) {
+        const envTag = vmResource.tags.Environment || vmResource.tags.environment || vmResource.tags.ENV || vmResource.tags.env;
+        if (envTag && envTag.toLowerCase() === 'production') {
+          detectedEnv = 'production';
+        }
+        const autoShutdownTag = vmResource.tags.AutoShutdown || vmResource.tags.autoshutdown;
+        if (autoShutdownTag && (autoShutdownTag.toLowerCase() === 'disabled' || autoShutdownTag.toLowerCase() === 'false')) {
+          isAutoShutdownEnabled = false;
+        }
+      }
+    } catch (tagErr) {}
+
     const timespan = `PT${windowMinutes}M`;
     const metricsData = await fetchVmCpuMetrics(resolved.subscriptionId, resourceGroup, vmName, timespan, resolved.credential);
     const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
-    const policyResult = evaluateShutdownPolicy(vmName, idleStatus, environment, autoShutdown);
+    const policyResult = evaluateShutdownPolicy(vmName, idleStatus, detectedEnv, isAutoShutdownEnabled);
     const dryRunResult = evaluateDryRunShutdown(vmName, policyResult);
+
+    const isDryRun = process.env.DRY_RUN !== 'false';
 
     recordAction({
       userId: req.user.id,
       connectionId: resolved.connectionId,
       vmName,
       action: 'DEALLOCATE',
-      status: 'DRY_RUN',
-      dryRun: true,
+      status: isDryRun ? 'DRY_RUN' : (policyResult.allowed ? 'LIVE_PREVIEW' : 'BLOCKED'),
+      dryRun: isDryRun,
       cpuAverage: policyResult.cpuAverage,
       reason: dryRunResult.reason
     });
