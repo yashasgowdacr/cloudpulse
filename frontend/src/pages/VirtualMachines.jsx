@@ -17,7 +17,8 @@ import {
   Eye,
   X,
   Play,
-  Pause
+  Pause,
+  Power
 } from 'lucide-react';
 
 const safeText = (val, fallback = '') => {
