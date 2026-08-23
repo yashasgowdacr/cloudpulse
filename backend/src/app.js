@@ -603,6 +603,9 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
   const connectionId = context.connectionId || options.connectionId || null;
   const isDryRun = process.env.DRY_RUN !== 'false';
 
+  const windowMinutes = options.windowMinutes || 30;
+  const timespan = options.timespan || `PT${windowMinutes}M`;
+  const threshold = options.threshold !== undefined ? options.threshold : 5;
   let environment = options.environment || 'development';
   let autoShutdown = options.autoShutdown !== undefined ? options.autoShutdown : true;
 
