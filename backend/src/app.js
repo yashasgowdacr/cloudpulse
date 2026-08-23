@@ -467,7 +467,8 @@ async function sendDeallocationNotification(actionRecord) {
     return;
   }
 
-  const cleanPass = pass ? pass.replace(/\s+/g, '') : '';
+  const cleanPass = pass ? pass.replace(/["'\s]/g, '') : '';
+  const cleanUser = user ? user.replace(/["'\s]/g, '') : '';
 
   try {
     const transporterOptions = (host && host.toLowerCase().includes('gmail'))
@@ -475,14 +476,14 @@ async function sendDeallocationNotification(actionRecord) {
           host: 'smtp.gmail.com',
           port: 465,
           secure: true,
-          auth: { user, pass: cleanPass },
+          auth: { user: cleanUser, pass: cleanPass },
           tls: { rejectUnauthorized: false }
         }
       : {
           host,
           port,
           secure: port === 465,
-          auth: (user && cleanPass) ? { user, pass: cleanPass } : undefined,
+          auth: (cleanUser && cleanPass) ? { user: cleanUser, pass: cleanPass } : undefined,
           tls: { rejectUnauthorized: false }
         };
 
@@ -508,7 +509,7 @@ async function sendDeallocationNotification(actionRecord) {
     ].join('\n');
 
     await transporter.sendMail({
-      from: user ? `"CloudPulse SaaS" <${user}>` : `cloudpulse@${host}`,
+      from: cleanUser ? `"CloudPulse SaaS" <${cleanUser}>` : `cloudpulse@${host}`,
       to: recipientEmail,
       subject,
       text: textContent
@@ -520,10 +521,10 @@ async function sendDeallocationNotification(actionRecord) {
     try {
       const fallbackTransporter = nodemailer.createTransport({
         service: 'gmail',
-        auth: { user, pass: cleanPass }
+        auth: { user: cleanUser, pass: cleanPass }
       });
       await fallbackTransporter.sendMail({
-        from: user ? `"CloudPulse SaaS" <${user}>` : `cloudpulse@${host}`,
+        from: cleanUser ? `"CloudPulse SaaS" <${cleanUser}>` : `cloudpulse@${host}`,
         to: recipientEmail,
         subject,
         text: textContent
@@ -544,6 +545,7 @@ async function recordAction(entry) {
   const dryRun = Boolean(entry.dryRun);
   const cpuAverage = entry.cpuAverage !== undefined ? entry.cpuAverage : (entry.policy ? entry.policy.cpuAverage : null);
   const reason = entry.reason || '';
+  const recipientEmail = entry.recipientEmail || entry.userEmail || null;
 
   try {
     const query = `
@@ -558,6 +560,7 @@ async function recordAction(entry) {
     const record = {
       id: row.id,
       userId: row.user_id,
+      recipientEmail: recipientEmail,
       connectionId: row.connection_id,
       vmName: row.vm_name,
       action: row.action,
@@ -1190,6 +1193,22 @@ app.post('/azure/vms/:resourceGroup/:vmName/start', authenticateToken, async (re
   } catch (error) {
     console.error(`[VM-START] Failed to start VM '${vmName}':`, error.message);
     const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to start VM';
+
+    try {
+      await recordAction({
+        userId: req.user.id,
+        connectionId: null,
+        vmName,
+        action: 'START',
+        status: 'FAILED',
+        dryRun: false,
+        cpuAverage: null,
+        reason: `Failed to power ON virtual machine '${vmName}': ${sanitizedMsg}`
+      });
+    } catch (recErr) {
+      console.error('[VM-START] Failed to record start failure:', recErr.message);
+    }
+
     return res.status(500).json({
       error: `Failed to start VM '${vmName}' in resource group '${resourceGroup}'`,
       message: sanitizedMsg
