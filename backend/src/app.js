@@ -8,7 +8,7 @@ const { ComputeManagementClient } = require('@azure/arm-compute');
 const { MetricsQueryClient } = require('@azure/monitor-query');
 const { CostManagementClient } = require('@azure/arm-costmanagement');
 const cron = require('node-cron');
-const { Resend } = require('resend');
+const { google } = require('googleapis');
 require('dotenv').config();
 
 const authRouter = require('./routes/auth');
@@ -432,7 +432,61 @@ function maskEmail(email) {
 }
 
 /**
- * Unified, safe notification dispatch function using Resend HTTPS API.
+ * Creates an authenticated Gmail API client using OAuth 2.0 refresh token.
+ */
+function getGmailClient() {
+  const clientId = (process.env.GOOGLE_CLIENT_ID || '').replace(/["'\s]/g, '');
+  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').replace(/["'\s]/g, '');
+  const redirectUri = (process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/oauth2callback').replace(/["'\s]/g, '');
+  const refreshToken = (process.env.GOOGLE_REFRESH_TOKEN || '').replace(/["'\s]/g, '');
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    return null;
+  }
+
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+
+  return google.gmail({ version: 'v1', auth: oauth2Client });
+}
+
+/**
+ * Constructs a MIME/RFC 2822 formatted email string and encodes it as base64url.
+ */
+function createMimeMessage({ from, to, subject, text, html }) {
+  const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
+  const messageParts = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${utf8Subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="cloudpulse_boundary"`,
+    ``,
+    `--cloudpulse_boundary`,
+    `Content-Type: text/plain; charset=utf-8`,
+    `Content-Transfer-Encoding: 7bit`,
+    ``,
+    text || '',
+    ``,
+    `--cloudpulse_boundary`,
+    `Content-Type: text/html; charset=utf-8`,
+    `Content-Transfer-Encoding: 7bit`,
+    ``,
+    html || text || '',
+    ``,
+    `--cloudpulse_boundary--`
+  ];
+
+  const mimeString = messageParts.join('\r\n');
+  return Buffer.from(mimeString)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/**
+ * Unified, safe notification dispatch function using Gmail API OAuth 2.0.
  * Always constructs subject and body in outer scope before attempting API call.
  */
 async function sendNotification({ recipientEmail, vmName, action, status, cpuAverage, reason, timestamp }) {
@@ -441,17 +495,13 @@ async function sendNotification({ recipientEmail, vmName, action, status, cpuAve
     return { success: false, reason: 'NO_RECIPIENT' };
   }
 
-  const rawKey = process.env.RESEND_API_KEY || '';
-  const apiKey = rawKey.replace(/["'\s]/g, '');
-  const rawFrom = process.env.RESEND_FROM_EMAIL || 'CloudPulse <onboarding@resend.dev>';
-  const fromEmail = rawFrom.replace(/["'\s]/g, '');
+  const senderEmail = (process.env.GMAIL_SENDER_EMAIL || 'cloudpulse.project@gmail.com').replace(/["'\s]/g, '');
+  const gmail = getGmailClient();
 
-  if (!apiKey || apiKey.startsWith('your_') || apiKey === 're_test_key') {
-    console.log('[NOTIFICATION] Skipped: RESEND_API_KEY environment variable unconfigured.');
-    return { success: false, reason: 'RESEND_NOT_CONFIGURED' };
+  if (!gmail) {
+    console.log('[NOTIFICATION] Skipped: Gmail API OAuth credentials (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN) unconfigured.');
+    return { success: false, reason: 'GMAIL_API_UNCONFIGURED' };
   }
-
-  const resend = new Resend(apiKey);
 
   // 1. Explicit Subject Construction (Guaranteed in Scope)
   const actionTitle = action === 'START' ? 'VM Start' : 'VM Deallocation';
@@ -490,27 +540,30 @@ async function sendNotification({ recipientEmail, vmName, action, status, cpuAve
     </div>
   `;
 
+  const fromHeader = `CloudPulse <${senderEmail}>`;
+  const encodedMessage = createMimeMessage({
+    from: fromHeader,
+    to: recipientEmail,
+    subject,
+    text: textContent,
+    html: htmlContent
+  });
+
   const maskedRecipient = maskEmail(recipientEmail);
   console.log(`[NOTIFICATION] Preparing notification | VM: ${vmName} | Action: ${action} | Status: ${status} | Recipient: ${maskedRecipient}`);
 
   try {
-    const { data, error } = await resend.emails.send({
-      from: fromEmail,
-      to: [recipientEmail],
-      subject,
-      text: textContent,
-      html: htmlContent
+    const response = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage
+      }
     });
 
-    if (error) {
-      console.error(`[NOTIFICATION] Resend send failed | VM: ${vmName} | ErrorName: ${error.name || 'API_ERROR'} | ErrorMessage: ${error.message}`);
-      return { success: false, error: error.message };
-    }
-
-    console.log(`[NOTIFICATION] Resend send succeeded | VM: ${vmName} | MessageId: ${data.id}`);
-    return { success: true, messageId: data.id };
+    console.log(`[NOTIFICATION] Gmail API send succeeded | VM: ${vmName} | MessageId: ${response.data.id}`);
+    return { success: true, messageId: response.data.id };
   } catch (err) {
-    console.error(`[NOTIFICATION] Resend send failed | VM: ${vmName} | ErrorMessage: ${err.message}`);
+    console.error(`[NOTIFICATION] Gmail API send failed | VM: ${vmName} | Error: ${err.message}`);
     return { success: false, error: err.message };
   }
 }
@@ -1504,8 +1557,9 @@ app.get('/api/notifications/test', authenticateToken, requireRole('ADMIN'), asyn
 
   if (result.success) {
     return res.json({
-      status: 'SUCCESS',
-      message: `Test email notification sent successfully via Resend API to ${targetEmail}.`,
+      success: true,
+      provider: 'gmail-api',
+      message: `Test email notification sent successfully via Gmail API to ${targetEmail}.`,
       messageId: result.messageId,
       recipient: targetEmail,
       timestamp: new Date().toISOString()
@@ -2138,18 +2192,18 @@ app.use((err, req, res, next) => {
   });
 });
 
-function verifyResendConfiguration() {
-  const rawKey = process.env.RESEND_API_KEY || '';
-  const apiKey = rawKey.replace(/["'\s]/g, '');
-  const rawFrom = process.env.RESEND_FROM_EMAIL || '';
-  const fromEmail = rawFrom.replace(/["'\s]/g, '');
+function verifyGmailConfiguration() {
+  const clientId = (process.env.GOOGLE_CLIENT_ID || '').replace(/["'\s]/g, '');
+  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').replace(/["'\s]/g, '');
+  const refreshToken = (process.env.GOOGLE_REFRESH_TOKEN || '').replace(/["'\s]/g, '');
+  const sender = (process.env.GMAIL_SENDER_EMAIL || 'cloudpulse.project@gmail.com').replace(/["'\s]/g, '');
 
-  if (!apiKey || apiKey.startsWith('your_') || apiKey === 're_test_key') {
-    console.log('[STARTUP-DIAGNOSTICS] Resend configuration incomplete | Required: RESEND_API_KEY, RESEND_FROM_EMAIL');
+  if (!clientId || !clientSecret || !refreshToken) {
+    console.log('[STARTUP-DIAGNOSTICS] Gmail API configuration incomplete | Required: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, GOOGLE_REFRESH_TOKEN');
     return;
   }
 
-  console.log(`[STARTUP-DIAGNOSTICS] Resend configuration initialized | API key: configured | From email: ${fromEmail ? 'configured' : 'configured'}`);
+  console.log(`[STARTUP-DIAGNOSTICS] Gmail API configuration initialized | Client ID: configured | Refresh token: configured | Sender: ${sender}`);
 }
 
 cron.schedule('*/10 * * * *', () => {
@@ -2160,7 +2214,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Scheduler initialized: running VM optimization scan every 10 minutes.`);
-  verifyResendConfiguration();
+  verifyGmailConfiguration();
 });
 
 
