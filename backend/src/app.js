@@ -1180,30 +1180,6 @@ app.post('/azure/vms/:resourceGroup/:vmName/start', authenticateToken, async (re
   }
 });
 
-app.get('/api/test-email', authenticateToken, async (req, res) => {
-  try {
-    const fakeRecord = {
-      userId: req.user.id,
-      connectionId: null,
-      vmName: 'cloudpulse-test-vm',
-      action: 'START',
-      status: 'SUCCESS',
-      dryRun: false,
-      cpuAverage: 4.2,
-      reason: 'Manual SMTP email delivery test from CloudPulse SaaS.',
-      timestamp: new Date().toISOString()
-    };
-    await sendDeallocationNotification(fakeRecord);
-    return res.json({
-      message: 'Test email dispatch attempt completed. Check your inbox and backend logs.',
-      user: req.user.email,
-      smtpHost: process.env.SMTP_HOST || 'NOT_SET'
-    });
-  } catch (err) {
-    return res.status(500).json({ error: 'EMAIL_TEST_FAILED', message: err.message });
-  }
-});
-
 
 
 app.get('/api/actions', authenticateToken, async (req, res) => {
