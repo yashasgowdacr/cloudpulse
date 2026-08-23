@@ -2145,11 +2145,11 @@ function verifyResendConfiguration() {
   const fromEmail = rawFrom.replace(/["'\s]/g, '');
 
   if (!apiKey || apiKey.startsWith('your_') || apiKey === 're_test_key') {
-    console.log('[STARTUP-DIAGNOSTICS] Resend configuration incomplete. Email alerts disabled.');
+    console.log('[STARTUP-DIAGNOSTICS] Resend configuration incomplete | Required: RESEND_API_KEY, RESEND_FROM_EMAIL');
     return;
   }
 
-  console.log(`[STARTUP-DIAGNOSTICS] Resend configuration initialized | API key: configured | From email: ${fromEmail || 'CloudPulse <onboarding@resend.dev>'}`);
+  console.log(`[STARTUP-DIAGNOSTICS] Resend configuration initialized | API key: configured | From email: ${fromEmail ? 'configured' : 'configured'}`);
 }
 
 cron.schedule('*/10 * * * *', () => {
