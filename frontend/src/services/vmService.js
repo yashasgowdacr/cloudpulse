@@ -60,5 +60,15 @@ export const vmService = {
       { params }
     );
     return response.data;
+  },
+
+  async startVm(resourceGroup, vmName, connectionId) {
+    const params = connectionId ? { connectionId } : {};
+    const response = await api.post(
+      `/azure/vms/${encodeURIComponent(resourceGroup)}/${encodeURIComponent(vmName)}/start`,
+      {},
+      { params }
+    );
+    return response.data;
   }
 };

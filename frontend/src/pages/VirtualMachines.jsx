@@ -175,6 +175,24 @@ const VirtualMachines = () => {
     }
   };
 
+  const [starting, setStarting] = useState(false);
+
+  const handleExecuteStart = async (vm) => {
+    setStarting(true);
+    setDeallocateMsg(null);
+    try {
+      const res = await vmService.startVm(vm.resourceGroup, vm.name, selectedConnectionId);
+      setDeallocateMsg({ type: 'success', text: res.message || `Successfully started VM '${vm.name}' on Azure.` });
+      await fetchVirtualMachines();
+      loadVmDetails({ ...vm, status: 'running' });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to start VM.';
+      setDeallocateMsg({ type: 'error', text: msg });
+    } finally {
+      setStarting(false);
+    }
+  };
+
   const renderStatusBadge = (status) => {
     const st = (status || '').toLowerCase();
     if (st.includes('running')) {
@@ -531,74 +549,119 @@ const VirtualMachines = () => {
               )}
             </div>
 
-            {/* Shutdown Preview / Live Execution Card */}
-            <div className="card" style={{
-              padding: '1.25rem',
-              border: dryRun.data?.dryRun === false ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(245, 158, 11, 0.4)',
-              backgroundColor: dryRun.data?.dryRun === false ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <ShieldCheck size={18} style={{ color: dryRun.data?.dryRun === false ? 'var(--status-success)' : 'var(--status-warning)' }} />
-                  <span style={{ fontSize: '0.875rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                    {dryRun.data?.dryRun === false ? 'Live Deallocation Mode (DRY_RUN=false)' : 'Shutdown Preview (DRY_RUN Enabled)'}
-                  </span>
-                </div>
-                <span className={`badge ${dryRun.data?.dryRun === false ? 'badge-success' : 'badge-warning'}`}>
-                  {dryRun.data?.dryRun === false ? 'LIVE MODE' : 'Preview Only'}
-                </span>
-              </div>
-
-              {dryRun.loading ? (
-                <div className="loading-center" style={{ minHeight: '50px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
-              ) : dryRun.error ? (
-                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                  {safeText(dryRun.error, 'Shutdown preview unavailable')}
-                </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                    CPU Avg: <strong>{(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage) != null ? `${Number(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage).toFixed(2)}%` : 'N/A'}</strong> | Threshold: <strong>{dryRun.data?.idleCpuThreshold ?? 5}%</strong>
+            {/* VM Power Control & Policy Card */}
+            {((selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated')) ? (
+              <div className="card" style={{
+                padding: '1.25rem',
+                border: '1px solid rgba(14, 165, 233, 0.4)',
+                backgroundColor: 'rgba(14, 165, 233, 0.05)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Play size={18} style={{ color: 'var(--accent-primary)' }} />
+                    <span style={{ fontSize: '0.875rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                      VM Power Control (Deallocated)
+                    </span>
                   </div>
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                    Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({safeText(dryRun.data?.reason, 'Evaluated')})
+                  <span className="badge badge-info">READY TO START</span>
+                </div>
+
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                  Virtual machine <strong>'{selectedVm.name}'</strong> is currently powered off. Click below to power it back ON on Azure.
+                </div>
+
+                {deallocateMsg && (
+                  <div style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.8125rem',
+                    marginBottom: '0.75rem',
+                    color: deallocateMsg.type === 'success' ? 'var(--status-success)' : (deallocateMsg.type === 'error' ? 'var(--status-error)' : 'var(--status-warning)'),
+                    backgroundColor: deallocateMsg.type === 'success' ? 'var(--status-success-bg)' : (deallocateMsg.type === 'error' ? 'var(--status-error-bg)' : 'rgba(245, 158, 11, 0.1)')
+                  }}>
+                    {deallocateMsg.text}
                   </div>
-                </div>
-              )}
+                )}
 
-              {deallocateMsg && (
-                <div style={{
-                  padding: '0.5rem 0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.8125rem',
-                  marginBottom: '0.75rem',
-                  color: deallocateMsg.type === 'success' ? 'var(--status-success)' : (deallocateMsg.type === 'error' ? 'var(--status-error)' : 'var(--status-warning)'),
-                  backgroundColor: deallocateMsg.type === 'success' ? 'var(--status-success-bg)' : (deallocateMsg.type === 'error' ? 'var(--status-error-bg)' : 'rgba(245, 158, 11, 0.1)')
-                }}>
-                  {deallocateMsg.text}
-                </div>
-              )}
-
-              {dryRun.data?.dryRun === false ? (
                 <button
                   className="btn btn-primary"
-                  onClick={() => handleExecuteShutdown(selectedVm)}
-                  disabled={deallocating || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated')}
-                  style={{ width: '100%', gap: '0.5rem', fontSize: '0.8125rem' }}
+                  onClick={() => handleExecuteStart(selectedVm)}
+                  disabled={starting}
+                  style={{ width: '100%', gap: '0.5rem', fontSize: '0.8125rem', backgroundColor: 'var(--status-success)', borderColor: 'var(--status-success)' }}
                 >
-                  <Power size={16} className={deallocating ? 'spinner' : ''} style={deallocating ? { animation: 'spin 1s linear infinite' } : {}} />
-                  <span>{deallocating ? 'Deallocating Live on Azure...' : 'Deallocate VM Live Now'}</span>
+                  <Play size={16} className={starting ? 'spinner' : ''} style={starting ? { animation: 'spin 1s linear infinite' } : {}} />
+                  <span>{starting ? 'Powering ON Live on Azure...' : 'Start VM Live Now'}</span>
                 </button>
-              ) : (
-                <button
-                  className="btn btn-secondary"
-                  disabled
-                  style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', fontSize: '0.8125rem' }}
-                >
-                  Shutdown unavailable while Dry Run is enabled
-                </button>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="card" style={{
+                padding: '1.25rem',
+                border: dryRun.data?.dryRun === false ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(245, 158, 11, 0.4)',
+                backgroundColor: dryRun.data?.dryRun === false ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <ShieldCheck size={18} style={{ color: dryRun.data?.dryRun === false ? 'var(--status-success)' : 'var(--status-warning)' }} />
+                    <span style={{ fontSize: '0.875rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                      {dryRun.data?.dryRun === false ? 'Live Deallocation Mode (DRY_RUN=false)' : 'Shutdown Preview (DRY_RUN Enabled)'}
+                    </span>
+                  </div>
+                  <span className={`badge ${dryRun.data?.dryRun === false ? 'badge-success' : 'badge-warning'}`}>
+                    {dryRun.data?.dryRun === false ? 'LIVE MODE' : 'Preview Only'}
+                  </span>
+                </div>
+
+                {dryRun.loading ? (
+                  <div className="loading-center" style={{ minHeight: '50px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
+                ) : dryRun.error ? (
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                    {safeText(dryRun.error, 'Shutdown preview unavailable')}
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                      CPU Avg: <strong>{(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage) != null ? `${Number(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage).toFixed(2)}%` : 'N/A'}</strong> | Threshold: <strong>{dryRun.data?.idleCpuThreshold ?? 5}%</strong>
+                    </div>
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                      Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({safeText(dryRun.data?.reason, 'Evaluated')})
+                    </div>
+                  </div>
+                )}
+
+                {deallocateMsg && (
+                  <div style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.8125rem',
+                    marginBottom: '0.75rem',
+                    color: deallocateMsg.type === 'success' ? 'var(--status-success)' : (deallocateMsg.type === 'error' ? 'var(--status-error)' : 'var(--status-warning)'),
+                    backgroundColor: deallocateMsg.type === 'success' ? 'var(--status-success-bg)' : (deallocateMsg.type === 'error' ? 'var(--status-error-bg)' : 'rgba(245, 158, 11, 0.1)')
+                  }}>
+                    {deallocateMsg.text}
+                  </div>
+                )}
+
+                {dryRun.data?.dryRun === false ? (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleExecuteShutdown(selectedVm)}
+                    disabled={deallocating}
+                    style={{ width: '100%', gap: '0.5rem', fontSize: '0.8125rem' }}
+                  >
+                    <Power size={16} className={deallocating ? 'spinner' : ''} style={deallocating ? { animation: 'spin 1s linear infinite' } : {}} />
+                    <span>{deallocating ? 'Deallocating Live on Azure...' : 'Deallocate VM Live Now'}</span>
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-secondary"
+                    disabled
+                    style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', fontSize: '0.8125rem' }}
+                  >
+                    Shutdown unavailable while Dry Run is enabled
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

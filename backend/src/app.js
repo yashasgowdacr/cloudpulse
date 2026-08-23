@@ -1089,6 +1089,52 @@ app.post('/azure/vms/:resourceGroup/:vmName/shutdown', authenticateToken, async 
   }
 });
 
+app.post('/azure/vms/:resourceGroup/:vmName/start', authenticateToken, async (req, res) => {
+  const { connectionId } = req.query;
+  const { resourceGroup, vmName } = req.params;
+
+  try {
+    const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
+
+    if (!resolved.subscriptionId) {
+      return res.status(500).json({
+        error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
+      });
+    }
+
+    const computeClient = new ComputeManagementClient(resolved.credential, resolved.subscriptionId);
+
+    console.log(`[VM-START] Initiating start command for VM '${vmName}' in RG '${resourceGroup}'...`);
+    await computeClient.virtualMachines.beginStartAndWait(resourceGroup, vmName);
+
+    await recordAction({
+      userId: req.user.id,
+      connectionId: resolved.connectionId,
+      vmName,
+      action: 'START',
+      status: 'SUCCESS',
+      dryRun: false,
+      cpuAverage: null,
+      reason: `Virtual machine '${vmName}' was successfully powered ON (started) on Azure.`
+    });
+
+    return res.json({
+      vmName,
+      action: 'START',
+      executed: true,
+      status: 'RUNNING',
+      message: `Virtual machine '${vmName}' was successfully started on Azure.`
+    });
+  } catch (error) {
+    console.error(`[VM-START] Failed to start VM '${vmName}':`, error.message);
+    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to start VM';
+    return res.status(500).json({
+      error: `Failed to start VM '${vmName}' in resource group '${resourceGroup}'`,
+      message: sanitizedMsg
+    });
+  }
+});
+
 
 
 app.get('/api/actions', authenticateToken, async (req, res) => {
