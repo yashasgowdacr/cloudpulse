@@ -421,29 +421,125 @@ function parseQueryOptions(query) {
   return { windowMinutes, timespan, threshold, environment, autoShutdown };
 }
 
+/**
+ * Safely masks email address for production logging (e.g. yashascr251@gmail.com -> y***1@gmail.com)
+ */
+function maskEmail(email) {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return 'unknown';
+  const [name, domain] = email.split('@');
+  if (name.length <= 2) return `${name.charAt(0)}***@${domain}`;
+  return `${name.charAt(0)}***${name.charAt(name.length - 1)}@${domain}`;
+}
+
+/**
+ * Creates Nodemailer SMTP transport from environment variables with IPv4 enforcement.
+ */
+function createSmtpTransporter() {
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const rawUser = process.env.SMTP_USER || '';
+  const rawPass = process.env.SMTP_PASS || '';
+
+  const cleanUser = rawUser.replace(/["'\s]/g, '');
+  const cleanPass = rawPass.replace(/["'\s]/g, '');
+
+  if (!host || !cleanUser || !cleanPass) {
+    return null;
+  }
+
+  const isPort465 = port === 465;
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: isPort465, // true for port 465, false for 587 (STARTTLS)
+    auth: { user: cleanUser, pass: cleanPass },
+    family: 4, // 🛡️ CRITICAL FOR RENDER: Forces IPv4 to resolve ENETUNREACH IPv6 routing errors
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+    tls: {
+      servername: host
+    }
+  });
+}
+
+/**
+ * Unified, safe notification dispatch function.
+ * Always constructs subject and body in outer scope before attempting SMTP send.
+ */
+async function sendNotification({ recipientEmail, vmName, action, status, cpuAverage, reason, timestamp }) {
+  if (!recipientEmail) {
+    console.log(`[NOTIFICATION] Skipped: No recipient email address provided for VM '${vmName}'.`);
+    return { success: false, reason: 'NO_RECIPIENT' };
+  }
+
+  const rawUser = process.env.SMTP_USER || '';
+  const cleanUser = rawUser.replace(/["'\s]/g, '');
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+
+  const transporter = createSmtpTransporter();
+  if (!transporter) {
+    console.log('[NOTIFICATION] Skipped: SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) not configured.');
+    return { success: false, reason: 'SMTP_NOT_CONFIGURED' };
+  }
+
+  // 1. Explicit Subject Construction (Guaranteed in Scope)
+  const actionTitle = action === 'START' ? 'VM Start' : 'VM Deallocation';
+  const subject = `[CloudPulse Alert] Azure ${actionTitle} ${status}: ${vmName}`;
+
+  // 2. Explicit Body Construction
+  const cpuStr = cpuAverage !== null && cpuAverage !== undefined ? `${cpuAverage}%` : 'N/A';
+  const formattedTime = timestamp ? new Date(timestamp).toUTCString() : new Date().toUTCString();
+
+  const textContent = [
+    `CloudPulse Azure Optimization Alert`,
+    `========================================`,
+    `Target VM: ${vmName}`,
+    `Action: ${action}`,
+    `Status: ${status}`,
+    `CPU Average: ${cpuStr}`,
+    `Reason: ${reason || 'N/A'}`,
+    `Timestamp: ${formattedTime}`,
+    `========================================`
+  ].join('\n');
+
+  const maskedRecipient = maskEmail(recipientEmail);
+  console.log(`[NOTIFICATION] Preparing notification | VM: ${vmName} | Action: ${action} | Status: ${status} | Recipient: ${maskedRecipient}`);
+
+  try {
+    const fromAddress = cleanUser ? `"CloudPulse SaaS" <${cleanUser}>` : `cloudpulse@${host}`;
+    const info = await transporter.sendMail({
+      from: fromAddress,
+      to: recipientEmail,
+      subject,
+      text: textContent
+    });
+
+    console.log(`[NOTIFICATION] SMTP send succeeded | VM: ${vmName} | MessageId: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error(`[NOTIFICATION] SMTP send failed | VM: ${vmName} | ErrorCode: ${error.code || 'UNKNOWN'} | ErrorMessage: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
 async function sendDeallocationNotification(actionRecord) {
+  // Do not send notification for dry-run preview simulation mode
   if (actionRecord.dryRun) {
     return;
   }
 
+  // Only dispatch email for SUCCESS or FAILED action outcomes
   const isSuccess = actionRecord.status === 'SUCCESS';
   const isFailure = actionRecord.status === 'FAILED';
-
   if (!isSuccess && !isFailure) {
     return;
   }
 
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!host) {
-    console.log('[NOTIFICATION] Notification skipped: SMTP_HOST environment variable not configured.');
-    return;
-  }
-
   let recipientEmail = actionRecord.recipientEmail || actionRecord.userEmail || null;
+
+  // Resolve customer email securely from database if not attached
   if (!recipientEmail && actionRecord.userId) {
     try {
       const userRes = await db.query(
@@ -454,86 +550,24 @@ async function sendDeallocationNotification(actionRecord) {
         recipientEmail = userRes.rows[0].email;
       }
     } catch (dbErr) {
-      console.error('[NOTIFICATION] Error resolving user email from database:', dbErr.message);
+      console.error('[NOTIFICATION] Error resolving customer email from database:', dbErr.message);
     }
   }
 
   if (!recipientEmail) {
-    recipientEmail = process.env.ALERT_EMAIL || process.env.SMTP_USER || null;
-  }
-
-  if (!recipientEmail) {
-    console.log(`[NOTIFICATION] Notification skipped: No recipient email address could be resolved for VM '${actionRecord.vmName}'.`);
+    console.log(`[NOTIFICATION] Skipped: Customer recipient email could not be resolved for VM '${actionRecord.vmName}'.`);
     return;
   }
 
-  const cleanPass = pass ? pass.replace(/["'\s]/g, '') : '';
-  const cleanUser = user ? user.replace(/["'\s]/g, '') : '';
-
-  try {
-    const transporterOptions = (host && host.toLowerCase().includes('gmail'))
-      ? {
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true,
-          auth: { user: cleanUser, pass: cleanPass },
-          tls: { rejectUnauthorized: false }
-        }
-      : {
-          host,
-          port,
-          secure: port === 465,
-          auth: (cleanUser && cleanPass) ? { user: cleanUser, pass: cleanPass } : undefined,
-          tls: { rejectUnauthorized: false }
-        };
-
-    const transporter = nodemailer.createTransport(transporterOptions);
-
-    const actionTitle = actionRecord.action === 'START' ? 'VM Start' : 'VM Deallocation';
-    const subject = `[CloudPulse Alert] Azure ${actionTitle} ${actionRecord.status}: ${actionRecord.vmName}`;
-    const cpuStr = actionRecord.cpuAverage !== null && actionRecord.cpuAverage !== undefined
-      ? `${actionRecord.cpuAverage}%`
-      : 'N/A';
-
-    const textContent = [
-      `CloudPulse Optimization Notification`,
-      `----------------------------------------`,
-      `User/Account: ${recipientEmail}`,
-      `VM Name: ${actionRecord.vmName}`,
-      `Action: ${actionRecord.action}`,
-      `Status: ${actionRecord.status}`,
-      `CPU Average: ${cpuStr}`,
-      `Reason: ${actionRecord.reason}`,
-      `Timestamp: ${actionRecord.timestamp}`,
-      `----------------------------------------`
-    ].join('\n');
-
-    await transporter.sendMail({
-      from: cleanUser ? `"CloudPulse SaaS" <${cleanUser}>` : `cloudpulse@${host}`,
-      to: recipientEmail,
-      subject,
-      text: textContent
-    });
-
-    console.log(`[NOTIFICATION] Email sent successfully to ${recipientEmail} for VM '${actionRecord.vmName}' (Action: ${actionRecord.action}, Status: ${actionRecord.status}).`);
-  } catch (error) {
-    console.error(`[NOTIFICATION] Primary SMTP transport failed for VM '${actionRecord.vmName}': ${error.message}. Retrying via Gmail service...`);
-    try {
-      const fallbackTransporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: cleanUser, pass: cleanPass }
-      });
-      await fallbackTransporter.sendMail({
-        from: cleanUser ? `"CloudPulse SaaS" <${cleanUser}>` : `cloudpulse@${host}`,
-        to: recipientEmail,
-        subject,
-        text: textContent
-      });
-      console.log(`[NOTIFICATION] Fallback Gmail email sent successfully to ${recipientEmail} for VM '${actionRecord.vmName}'.`);
-    } catch (fallbackErr) {
-      console.error(`[NOTIFICATION] All email dispatch attempts failed for VM '${actionRecord.vmName}':`, fallbackErr.message);
-    }
-  }
+  await sendNotification({
+    recipientEmail,
+    vmName: actionRecord.vmName,
+    action: actionRecord.action || 'DEALLOCATE',
+    status: actionRecord.status,
+    cpuAverage: actionRecord.cpuAverage,
+    reason: actionRecord.reason,
+    timestamp: actionRecord.timestamp
+  });
 }
 
 async function recordAction(entry) {
@@ -571,10 +605,11 @@ async function recordAction(entry) {
       timestamp: row.created_at
     };
 
+    // 🛡️ Notification MUST NOT break VM operations. Catch notification errors separately.
     try {
       await sendDeallocationNotification(record);
     } catch (err) {
-      console.error('[NOTIFICATION] Unexpected error handling email dispatch:', err.message);
+      console.error('[NOTIFICATION] Non-fatal notification dispatch error:', err.message);
     }
 
     return record;
@@ -586,8 +621,7 @@ async function recordAction(entry) {
       status,
       dryRun,
       cpuAverage,
-      reason,
-      timestamp: new Date().toISOString()
+      reason
     };
   }
 }
@@ -2140,6 +2174,31 @@ app.use((err, req, res, next) => {
   });
 });
 
+function verifySmtpConfiguration() {
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = process.env.SMTP_PORT || '587';
+  const user = (process.env.SMTP_USER || '').replace(/["'\s]/g, '');
+  const pass = (process.env.SMTP_PASS || '').replace(/["'\s]/g, '');
+
+  if (!host || !user || !pass) {
+    console.log('[STARTUP-DIAGNOSTICS] SMTP configuration incomplete. Email alerts disabled.');
+    return;
+  }
+
+  console.log(`[STARTUP-DIAGNOSTICS] SMTP Configuration initialized | Host: ${host} | Port: ${port} | User: ${maskEmail(user)}`);
+
+  const transporter = createSmtpTransporter();
+  if (transporter) {
+    transporter.verify((error) => {
+      if (error) {
+        console.warn(`[STARTUP-DIAGNOSTICS] SMTP server connection check warning: ${error.message}`);
+      } else {
+        console.log('[STARTUP-DIAGNOSTICS] SMTP server successfully verified and ready for notifications.');
+      }
+    });
+  }
+}
+
 cron.schedule('*/10 * * * *', () => {
   runScheduledOptimization();
 });
@@ -2148,6 +2207,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Scheduler initialized: running VM optimization scan every 10 minutes.`);
+  verifySmtpConfiguration();
 });
 
 
