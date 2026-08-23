@@ -8,14 +8,8 @@ const { ComputeManagementClient } = require('@azure/arm-compute');
 const { MetricsQueryClient } = require('@azure/monitor-query');
 const { CostManagementClient } = require('@azure/arm-costmanagement');
 const cron = require('node-cron');
-const nodemailer = require('nodemailer');
-const dns = require('dns');
+const { Resend } = require('resend');
 require('dotenv').config();
-
-// 🛡️ CRITICAL FOR RENDER: Force Node.js global DNS resolution to prioritize IPv4 over IPv6
-if (dns.setDefaultResultOrder) {
-  dns.setDefaultResultOrder('ipv4first');
-}
 
 const authRouter = require('./routes/auth');
 const azureConnectionsRouter = require('./routes/azureConnections');
@@ -438,47 +432,8 @@ function maskEmail(email) {
 }
 
 /**
- * Creates Nodemailer SMTP transport from environment variables with IPv4 enforcement.
- */
-function createSmtpTransporter() {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const rawUser = process.env.SMTP_USER || '';
-  const rawPass = process.env.SMTP_PASS || '';
-
-  const cleanUser = rawUser.replace(/["'\s]/g, '');
-  const cleanPass = rawPass.replace(/["'\s]/g, '');
-
-  if (!host || !cleanUser || !cleanPass) {
-    return null;
-  }
-
-  const isPort465 = port === 465;
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: isPort465, // true for port 465, false for 587 (STARTTLS)
-    auth: { user: cleanUser, pass: cleanPass },
-    lookup: (hostname, options, callback) => {
-      if (typeof options === 'function') {
-        callback = options;
-        options = {};
-      }
-      dns.lookup(hostname, { ...options, family: 4 }, callback);
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    tls: {
-      servername: host
-    }
-  });
-}
-
-/**
- * Unified, safe notification dispatch function.
- * Always constructs subject and body in outer scope before attempting SMTP send.
+ * Unified, safe notification dispatch function using Resend HTTPS API.
+ * Always constructs subject and body in outer scope before attempting API call.
  */
 async function sendNotification({ recipientEmail, vmName, action, status, cpuAverage, reason, timestamp }) {
   if (!recipientEmail) {
@@ -486,15 +441,17 @@ async function sendNotification({ recipientEmail, vmName, action, status, cpuAve
     return { success: false, reason: 'NO_RECIPIENT' };
   }
 
-  const rawUser = process.env.SMTP_USER || '';
-  const cleanUser = rawUser.replace(/["'\s]/g, '');
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const rawKey = process.env.RESEND_API_KEY || '';
+  const apiKey = rawKey.replace(/["'\s]/g, '');
+  const rawFrom = process.env.RESEND_FROM_EMAIL || 'CloudPulse <onboarding@resend.dev>';
+  const fromEmail = rawFrom.replace(/["'\s]/g, '');
 
-  const transporter = createSmtpTransporter();
-  if (!transporter) {
-    console.log('[NOTIFICATION] Skipped: SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) not configured.');
-    return { success: false, reason: 'SMTP_NOT_CONFIGURED' };
+  if (!apiKey || apiKey.startsWith('your_') || apiKey === 're_test_key') {
+    console.log('[NOTIFICATION] Skipped: RESEND_API_KEY environment variable unconfigured.');
+    return { success: false, reason: 'RESEND_NOT_CONFIGURED' };
   }
+
+  const resend = new Resend(apiKey);
 
   // 1. Explicit Subject Construction (Guaranteed in Scope)
   const actionTitle = action === 'START' ? 'VM Start' : 'VM Deallocation';
@@ -516,23 +473,45 @@ async function sendNotification({ recipientEmail, vmName, action, status, cpuAve
     `========================================`
   ].join('\n');
 
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+      <h2 style="color: #0f172a; margin-top: 0;">CloudPulse Azure Optimization Alert</h2>
+      <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
+      <table style="width: 100%; border-collapse: collapse; text-align: left;">
+        <tr><td style="padding: 8px 0; color: #64748b; font-weight: bold;">Target VM:</td><td style="padding: 8px 0; color: #0f172a;">${vmName}</td></tr>
+        <tr><td style="padding: 8px 0; color: #64748b; font-weight: bold;">Action:</td><td style="padding: 8px 0; color: #0f172a;">${action}</td></tr>
+        <tr><td style="padding: 8px 0; color: #64748b; font-weight: bold;">Status:</td><td style="padding: 8px 0; color: ${status === 'SUCCESS' ? '#16a34a' : '#dc2626'}; font-weight: bold;">${status}</td></tr>
+        <tr><td style="padding: 8px 0; color: #64748b; font-weight: bold;">CPU Average:</td><td style="padding: 8px 0; color: #0f172a;">${cpuStr}</td></tr>
+        <tr><td style="padding: 8px 0; color: #64748b; font-weight: bold;">Reason:</td><td style="padding: 8px 0; color: #0f172a;">${reason || 'N/A'}</td></tr>
+        <tr><td style="padding: 8px 0; color: #64748b; font-weight: bold;">Timestamp:</td><td style="padding: 8px 0; color: #0f172a;">${formattedTime}</td></tr>
+      </table>
+      <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
+      <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0;">This email was sent automatically by CloudPulse SaaS Azure Optimization Service.</p>
+    </div>
+  `;
+
   const maskedRecipient = maskEmail(recipientEmail);
   console.log(`[NOTIFICATION] Preparing notification | VM: ${vmName} | Action: ${action} | Status: ${status} | Recipient: ${maskedRecipient}`);
 
   try {
-    const fromAddress = cleanUser ? `"CloudPulse SaaS" <${cleanUser}>` : `cloudpulse@${host}`;
-    const info = await transporter.sendMail({
-      from: fromAddress,
-      to: recipientEmail,
+    const { data, error } = await resend.emails.send({
+      from: fromEmail,
+      to: [recipientEmail],
       subject,
-      text: textContent
+      text: textContent,
+      html: htmlContent
     });
 
-    console.log(`[NOTIFICATION] SMTP send succeeded | VM: ${vmName} | MessageId: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    console.error(`[NOTIFICATION] SMTP send failed | VM: ${vmName} | ErrorCode: ${error.code || 'UNKNOWN'} | ErrorMessage: ${error.message}`);
-    return { success: false, error: error.message };
+    if (error) {
+      console.error(`[NOTIFICATION] Resend send failed | VM: ${vmName} | ErrorName: ${error.name || 'API_ERROR'} | ErrorMessage: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+
+    console.log(`[NOTIFICATION] Resend send succeeded | VM: ${vmName} | MessageId: ${data.id}`);
+    return { success: true, messageId: data.id };
+  } catch (err) {
+    console.error(`[NOTIFICATION] Resend send failed | VM: ${vmName} | ErrorMessage: ${err.message}`);
+    return { success: false, error: err.message };
   }
 }
 
@@ -1504,65 +1483,38 @@ app.get('/api/scheduler/run-now', authenticateToken, requireRole('ADMIN'), async
 });
 
 app.get('/api/notifications/test', authenticateToken, requireRole('ADMIN'), async (req, res) => {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const targetEmail = req.user && req.user.email ? req.user.email : null;
 
-  const targetEmail = req.user && req.user.email ? req.user.email : (process.env.ALERT_EMAIL || null);
-
-  if (!host || !targetEmail) {
+  if (!targetEmail) {
     return res.status(400).json({
       status: 'FAILED',
-      message: 'SMTP configuration is incomplete. Ensure SMTP_HOST environment variable is configured.',
-      configured: {
-        SMTP_HOST: Boolean(host),
-        targetEmail: Boolean(targetEmail)
-      }
+      message: 'Target recipient email address could not be resolved from authenticated user session.'
     });
   }
 
-  try {
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: (user && pass) ? { user, pass } : undefined
-    });
+  const result = await sendNotification({
+    recipientEmail: targetEmail,
+    vmName: 'test-vm-diagnostics',
+    action: 'START',
+    status: 'SUCCESS',
+    cpuAverage: null,
+    reason: 'Manual admin test notification triggered via /api/notifications/test',
+    timestamp: new Date().toISOString()
+  });
 
-    const subject = `[CloudPulse Test] Email Notification Test`;
-    const textContent = [
-      `CloudPulse Notification Test`,
-      `----------------------------------------`,
-      `This is a manual test notification from CloudPulse backend.`,
-      `SMTP Host: ${host}`,
-      `Recipient: ${targetEmail}`,
-      `Timestamp: ${new Date().toISOString()}`,
-      `----------------------------------------`
-    ].join('\n');
-
-    await transporter.sendMail({
-      from: user || `cloudpulse@${host}`,
-      to: targetEmail,
-      subject,
-      text: textContent
-    });
-
-    console.log(`[NOTIFICATION-TEST] Test email sent successfully to ${targetEmail}.`);
-
+  if (result.success) {
     return res.json({
       status: 'SUCCESS',
-      message: `Test email notification sent successfully to ${targetEmail}.`,
+      message: `Test email notification sent successfully via Resend API to ${targetEmail}.`,
+      messageId: result.messageId,
       recipient: targetEmail,
       timestamp: new Date().toISOString()
     });
-  } catch (error) {
-    console.error(`[NOTIFICATION-TEST] Failed to send test email to ${targetEmail}:`, error.message);
+  } else {
     return res.status(500).json({
       status: 'FAILED',
-      message: `Failed to send test email notification: ${error.message}`,
-      recipient: targetEmail,
-      details: error.message
+      message: `Failed to send test email notification: ${result.error || result.reason}`,
+      recipient: targetEmail
     });
   }
 });
@@ -2186,29 +2138,18 @@ app.use((err, req, res, next) => {
   });
 });
 
-function verifySmtpConfiguration() {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = process.env.SMTP_PORT || '587';
-  const user = (process.env.SMTP_USER || '').replace(/["'\s]/g, '');
-  const pass = (process.env.SMTP_PASS || '').replace(/["'\s]/g, '');
+function verifyResendConfiguration() {
+  const rawKey = process.env.RESEND_API_KEY || '';
+  const apiKey = rawKey.replace(/["'\s]/g, '');
+  const rawFrom = process.env.RESEND_FROM_EMAIL || '';
+  const fromEmail = rawFrom.replace(/["'\s]/g, '');
 
-  if (!host || !user || !pass) {
-    console.log('[STARTUP-DIAGNOSTICS] SMTP configuration incomplete. Email alerts disabled.');
+  if (!apiKey || apiKey.startsWith('your_') || apiKey === 're_test_key') {
+    console.log('[STARTUP-DIAGNOSTICS] Resend configuration incomplete. Email alerts disabled.');
     return;
   }
 
-  console.log(`[STARTUP-DIAGNOSTICS] SMTP Configuration initialized | Host: ${host} | Port: ${port} | User: ${maskEmail(user)}`);
-
-  const transporter = createSmtpTransporter();
-  if (transporter) {
-    transporter.verify((error) => {
-      if (error) {
-        console.warn(`[STARTUP-DIAGNOSTICS] SMTP server connection check warning: ${error.message}`);
-      } else {
-        console.log('[STARTUP-DIAGNOSTICS] SMTP server successfully verified and ready for notifications.');
-      }
-    });
-  }
+  console.log(`[STARTUP-DIAGNOSTICS] Resend configuration initialized | API key: configured | From email: ${fromEmail || 'CloudPulse <onboarding@resend.dev>'}`);
 }
 
 cron.schedule('*/10 * * * *', () => {
@@ -2219,7 +2160,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Scheduler initialized: running VM optimization scan every 10 minutes.`);
-  verifySmtpConfiguration();
+  verifyResendConfiguration();
 });
 
 
