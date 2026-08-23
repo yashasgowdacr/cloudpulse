@@ -470,17 +470,22 @@ async function sendDeallocationNotification(actionRecord) {
     return;
   }
 
+  const cleanPass = pass ? pass.replace(/\s+/g, '') : '';
+
   try {
     const transporterOptions = (host && host.toLowerCase().includes('gmail'))
       ? {
-          service: 'gmail',
-          auth: (user && pass) ? { user, pass } : undefined
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true,
+          auth: { user, pass: cleanPass },
+          tls: { rejectUnauthorized: false }
         }
       : {
           host,
           port,
           secure: port === 465,
-          auth: (user && pass) ? { user, pass } : undefined,
+          auth: (user && cleanPass) ? { user, pass: cleanPass } : undefined,
           tls: { rejectUnauthorized: false }
         };
 
