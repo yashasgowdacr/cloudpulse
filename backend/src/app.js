@@ -519,7 +519,22 @@ async function sendDeallocationNotification(actionRecord) {
 
     console.log(`[NOTIFICATION] Email sent successfully to ${recipientEmail} for VM '${actionRecord.vmName}' (Action: ${actionRecord.action}, Status: ${actionRecord.status}).`);
   } catch (error) {
-    console.error(`[NOTIFICATION] Failed to send email notification for VM '${actionRecord.vmName}':`, error.message);
+    console.error(`[NOTIFICATION] Primary SMTP transport failed for VM '${actionRecord.vmName}': ${error.message}. Retrying via Gmail service...`);
+    try {
+      const fallbackTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user, pass: cleanPass }
+      });
+      await fallbackTransporter.sendMail({
+        from: user ? `"CloudPulse SaaS" <${user}>` : `cloudpulse@${host}`,
+        to: recipientEmail,
+        subject,
+        text: textContent
+      });
+      console.log(`[NOTIFICATION] Fallback Gmail email sent successfully to ${recipientEmail} for VM '${actionRecord.vmName}'.`);
+    } catch (fallbackErr) {
+      console.error(`[NOTIFICATION] All email dispatch attempts failed for VM '${actionRecord.vmName}':`, fallbackErr.message);
+    }
   }
 }
 
