@@ -443,22 +443,19 @@ async function sendDeallocationNotification(actionRecord) {
     return;
   }
 
-  if (!actionRecord.userId) {
-    console.log(`[NOTIFICATION] Notification skipped: Action record missing user ID for VM '${actionRecord.vmName}'.`);
-    return;
-  }
-
-  let recipientEmail = null;
-  try {
-    const userRes = await db.query(
-      `SELECT email FROM users WHERE id = $1 AND status = 'ACTIVE'`,
-      [actionRecord.userId]
-    );
-    if (userRes.rows.length > 0) {
-      recipientEmail = userRes.rows[0].email;
+  let recipientEmail = actionRecord.recipientEmail || actionRecord.userEmail || null;
+  if (!recipientEmail && actionRecord.userId) {
+    try {
+      const userRes = await db.query(
+        `SELECT email FROM users WHERE id = $1 AND status = 'ACTIVE'`,
+        [actionRecord.userId]
+      );
+      if (userRes.rows.length > 0) {
+        recipientEmail = userRes.rows[0].email;
+      }
+    } catch (dbErr) {
+      console.error('[NOTIFICATION] Error resolving user email from database:', dbErr.message);
     }
-  } catch (dbErr) {
-    console.error('[NOTIFICATION] Error resolving user email from database:', dbErr.message);
   }
 
   if (!recipientEmail) {
