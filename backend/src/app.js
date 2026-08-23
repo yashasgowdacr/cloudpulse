@@ -475,7 +475,10 @@ async function sendDeallocationNotification(actionRecord) {
       host,
       port,
       secure: port === 465,
-      auth: (user && pass) ? { user, pass } : undefined
+      auth: (user && pass) ? { user, pass } : undefined,
+      tls: {
+        rejectUnauthorized: false
+      }
     });
 
     const actionTitle = actionRecord.action === 'START' ? 'VM Start' : 'VM Deallocation';
@@ -498,13 +501,13 @@ async function sendDeallocationNotification(actionRecord) {
     ].join('\n');
 
     await transporter.sendMail({
-      from: user || `cloudpulse@${host}`,
+      from: user ? `"CloudPulse SaaS" <${user}>` : `cloudpulse@${host}`,
       to: recipientEmail,
       subject,
       text: textContent
     });
 
-    console.log(`[NOTIFICATION] Email sent successfully to ${recipientEmail} for VM '${actionRecord.vmName}' (Status: ${actionRecord.status}).`);
+    console.log(`[NOTIFICATION] Email sent successfully to ${recipientEmail} for VM '${actionRecord.vmName}' (Action: ${actionRecord.action}, Status: ${actionRecord.status}).`);
   } catch (error) {
     console.error(`[NOTIFICATION] Failed to send email notification for VM '${actionRecord.vmName}':`, error.message);
   }
@@ -543,9 +546,11 @@ async function recordAction(entry) {
       timestamp: row.created_at
     };
 
-    sendDeallocationNotification(record).catch(err => {
+    try {
+      await sendDeallocationNotification(record);
+    } catch (err) {
       console.error('[NOTIFICATION] Unexpected error handling email dispatch:', err.message);
-    });
+    }
 
     return record;
   } catch (err) {
