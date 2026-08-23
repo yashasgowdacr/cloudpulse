@@ -9,7 +9,13 @@ const { MetricsQueryClient } = require('@azure/monitor-query');
 const { CostManagementClient } = require('@azure/arm-costmanagement');
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
+const dns = require('dns');
 require('dotenv').config();
+
+// 🛡️ CRITICAL FOR RENDER: Force Node.js global DNS resolution to prioritize IPv4 over IPv6
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 const authRouter = require('./routes/auth');
 const azureConnectionsRouter = require('./routes/azureConnections');
@@ -454,7 +460,13 @@ function createSmtpTransporter() {
     port,
     secure: isPort465, // true for port 465, false for 587 (STARTTLS)
     auth: { user: cleanUser, pass: cleanPass },
-    family: 4, // 🛡️ CRITICAL FOR RENDER: Forces IPv4 to resolve ENETUNREACH IPv6 routing errors
+    lookup: (hostname, options, callback) => {
+      if (typeof options === 'function') {
+        callback = options;
+        options = {};
+      }
+      dns.lookup(hostname, { ...options, family: 4 }, callback);
+    },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
