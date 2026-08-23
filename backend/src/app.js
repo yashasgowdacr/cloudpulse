@@ -462,7 +462,11 @@ async function sendDeallocationNotification(actionRecord) {
   }
 
   if (!recipientEmail) {
-    console.log(`[NOTIFICATION] Notification skipped: No active user account found for user ID '${actionRecord.userId}' (VM: '${actionRecord.vmName}').`);
+    recipientEmail = process.env.ALERT_EMAIL || process.env.SMTP_USER || null;
+  }
+
+  if (!recipientEmail) {
+    console.log(`[NOTIFICATION] Notification skipped: No recipient email address could be resolved for VM '${actionRecord.vmName}'.`);
     return;
   }
 
@@ -474,7 +478,8 @@ async function sendDeallocationNotification(actionRecord) {
       auth: (user && pass) ? { user, pass } : undefined
     });
 
-    const subject = `[CloudPulse Alert] Azure VM Deallocation ${actionRecord.status}: ${actionRecord.vmName}`;
+    const actionTitle = actionRecord.action === 'START' ? 'VM Start' : 'VM Deallocation';
+    const subject = `[CloudPulse Alert] Azure ${actionTitle} ${actionRecord.status}: ${actionRecord.vmName}`;
     const cpuStr = actionRecord.cpuAverage !== null && actionRecord.cpuAverage !== undefined
       ? `${actionRecord.cpuAverage}%`
       : 'N/A';
