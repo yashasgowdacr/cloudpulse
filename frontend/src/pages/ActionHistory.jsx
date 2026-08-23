@@ -125,16 +125,10 @@ const ActionHistory = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button className="btn btn-primary" onClick={handleRunScan} disabled={scanning || loading}>
-            <Play size={16} className={scanning ? 'spinner' : ''} style={scanning ? { animation: 'spin 1s linear infinite' } : {}} />
-            <span>{scanning ? 'Scanning Azure...' : 'Run Optimization Scan'}</span>
-          </button>
-          <button className="btn btn-secondary" onClick={fetchHistory} disabled={loading || scanning}>
-            <RefreshCw size={16} className={loading ? 'spinner' : ''} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
-            <span>Refresh History</span>
-          </button>
-        </div>
+        <button className="btn btn-secondary" onClick={fetchHistory} disabled={loading}>
+          <RefreshCw size={16} className={loading ? 'spinner' : ''} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
+          <span>Refresh History</span>
+        </button>
       </div>
 
       {/* Simulation / Dry Run Banner */}

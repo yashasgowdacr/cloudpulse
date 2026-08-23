@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { dashboardService } from '../services/dashboardService';
+import api from '../services/api';
 import { Link } from 'react-router-dom';
 import {
   Cloud,
@@ -13,7 +14,8 @@ import {
   AlertCircle,
   CheckCircle2,
   TrendingDown,
-  ShieldCheck
+  ShieldCheck,
+  Play
 } from 'lucide-react';
 
 const safeErrString = (errVal, fallback = 'Error loading data') => {
@@ -31,9 +33,9 @@ const Dashboard = () => {
   const [vms, setVms] = useState({ loading: true, data: null, error: null, multiConnection: false });
   const [cost, setCost] = useState({ loading: true, data: null, error: null });
   const [policy, setPolicy] = useState({ loading: true, data: null, error: null });
-  const [actions, setActions] = useState({ loading: true, data: null, error: null });
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
 
   // 1. Fetch Azure Connections
   const fetchConnections = useCallback(async () => {
@@ -106,11 +108,22 @@ const Dashboard = () => {
       fetchConnections(),
       fetchVms(),
       fetchCost(),
-      fetchPolicy(),
-      fetchActions()
+      fetchPolicy()
     ]);
     setIsRefreshing(false);
-  }, [fetchConnections, fetchVms, fetchCost, fetchPolicy, fetchActions]);
+  }, [fetchConnections, fetchVms, fetchCost, fetchPolicy]);
+
+  const handleRunScan = async () => {
+    setIsScanning(true);
+    try {
+      await api.post('/api/optimization/run-now');
+      await loadAllData();
+    } catch (err) {
+      console.error('Scan error:', err);
+    } finally {
+      setIsScanning(false);
+    }
+  };
 
   useEffect(() => {
     loadAllData();
@@ -143,15 +156,26 @@ const Dashboard = () => {
           </p>
         </div>
 
-        <button 
-          className="btn btn-secondary" 
-          onClick={loadAllData} 
-          disabled={isRefreshing}
-          style={{ gap: '0.5rem' }}
-        >
-          <RefreshCw size={16} className={isRefreshing ? 'spinner' : ''} style={isRefreshing ? { animation: 'spin 1s linear infinite' } : {}} />
-          <span>{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleRunScan}
+            disabled={isScanning || isRefreshing}
+            style={{ gap: '0.5rem' }}
+          >
+            <Play size={16} className={isScanning ? 'spinner' : ''} style={isScanning ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>{isScanning ? 'Scanning Azure...' : 'Run Optimization Scan'}</span>
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={loadAllData} 
+            disabled={isRefreshing || isScanning}
+            style={{ gap: '0.5rem' }}
+          >
+            <RefreshCw size={16} className={isRefreshing ? 'spinner' : ''} style={isRefreshing ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Grid Stats Cards */}
@@ -291,69 +315,6 @@ const Dashboard = () => {
             </>
           )}
         </div>
-      </div>
-
-      {/* E. Action Audit History */}
-      <div className="card" style={{ marginTop: '1rem' }}>
-        <div className="card-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <History size={22} style={{ color: 'var(--accent-primary)' }} />
-            <span className="card-title">Recent Optimization Audit Log</span>
-          </div>
-          <span className="badge badge-info">PostgreSQL Persisted</span>
-        </div>
-
-        {actions.loading ? (
-          <div className="loading-center" style={{ padding: '2rem' }}>
-            <div className="spinner"></div>
-            <p style={{ fontSize: '0.875rem' }}>Loading action audit history...</p>
-          </div>
-        ) : actions.error ? (
-          <div style={{ color: 'var(--status-error)', padding: '1rem', fontSize: '0.875rem' }}>
-            {safeErrString(actions.error, 'Unable to load action history.')}
-          </div>
-        ) : (actions.data || []).length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2.5rem 1rem', fontSize: '0.875rem' }}>
-            No optimization actions recorded yet.
-          </div>
-        ) : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>VM Name</th>
-                  <th>Action</th>
-                  <th>Status</th>
-                  <th>Mode</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(actions.data || []).slice(0, 5).map((act) => (
-                  <tr key={act.id}>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
-                      {new Date(act.timestamp || act.createdAt).toLocaleString()}
-                    </td>
-                    <td style={{ fontWeight: '600' }}>{act.vmName}</td>
-                    <td>{act.action}</td>
-                    <td>
-                      <span className={`badge ${act.status === 'SUCCESS' ? 'badge-success' : 'badge-error'}`}>
-                        {act.status}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="badge badge-info">
-                        {act.dryRun ? 'DRY_RUN' : 'LIVE'}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>{act.reason || 'N/A'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );
