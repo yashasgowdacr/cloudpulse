@@ -744,9 +744,36 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
     return result;
   }
 
-  const metricsData = await fetchVmCpuMetrics(subscriptionId, resourceGroup, vmName, timespan, customCredential);
-  const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
-  const policyResult = evaluateShutdownPolicy(vmName, idleStatus, environment, autoShutdown);
+  const isManual = options.isManual !== undefined ? options.isManual : true;
+
+  let policyResult;
+  if (isManual) {
+    if (environment === 'production') {
+      policyResult = {
+        vmName,
+        idle: false,
+        cpuAverage: null,
+        environment: 'production',
+        autoShutdown: true,
+        allowed: false,
+        reason: 'Shutdown blocked: Virtual machine is in a production environment.'
+      };
+    } else {
+      policyResult = {
+        vmName,
+        idle: true,
+        cpuAverage: null,
+        environment,
+        autoShutdown: true,
+        allowed: true,
+        reason: 'Manual deallocation requested by authenticated user.'
+      };
+    }
+  } else {
+    const metricsData = await fetchVmCpuMetrics(subscriptionId, resourceGroup, vmName, timespan, customCredential);
+    const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
+    policyResult = evaluateShutdownPolicy(vmName, idleStatus, environment, autoShutdown);
+  }
 
   if (!policyResult.allowed) {
     const result = {
@@ -1191,7 +1218,8 @@ app.post('/api/optimization/run-now', authenticateToken, async (req, res) => {
     const shutdownOptions = {
       threshold: userPolicy.idleCpuThreshold,
       windowMinutes: userPolicy.monitoringWindowMinutes,
-      autoShutdown: userPolicy.autoShutdown
+      autoShutdown: userPolicy.autoShutdown,
+      isManual: false
     };
 
     const results = [];
@@ -1294,7 +1322,8 @@ async function runScheduledOptimization() {
         const shutdownOptions = {
           threshold: userPolicy.idleCpuThreshold,
           windowMinutes: userPolicy.monitoringWindowMinutes,
-          autoShutdown: userPolicy.autoShutdown
+          autoShutdown: userPolicy.autoShutdown,
+          isManual: false
         };
 
         for (const conn of connections) {
