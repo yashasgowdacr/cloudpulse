@@ -322,10 +322,10 @@ const CostSavings = () => {
                         Potential Hourly Savings
                       </div>
                       <div style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--status-success)', marginTop: '0.25rem' }}>
-                        ${Number(savingsResult.data.potentialHourlySavings || 0).toFixed(4)}
+                        ₹{Number(savingsResult.data.potentialHourlySavings || 0).toFixed(4)}
                       </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        {savingsResult.data.currency || 'USD'} / hour
+                        INR / hour
                       </div>
                     </div>
 
@@ -334,10 +334,10 @@ const CostSavings = () => {
                         Potential 30-Min Savings
                       </div>
                       <div style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--status-success)', marginTop: '0.25rem' }}>
-                        ${Number(savingsResult.data.potential30MinuteSavings || 0).toFixed(4)}
+                        ₹{Number(savingsResult.data.potential30MinuteSavings || 0).toFixed(4)}
                       </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        {savingsResult.data.currency || 'USD'} per window
+                        INR per window
                       </div>
                     </div>
                   </div>
@@ -347,16 +347,22 @@ const CostSavings = () => {
                     <div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>Idle Status</div>
                       <div style={{ marginTop: '0.25rem' }}>
-                        <span className={`badge ${savingsResult.data.idle ? 'badge-success' : 'badge-warning'}`}>
-                          {savingsResult.data.idle ? 'IDLE' : 'NOT IDLE'}
-                        </span>
+                        {savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? (
+                          <span className="badge badge-info">ALREADY STOPPED</span>
+                        ) : (
+                          <span className={`badge ${savingsResult.data.idle ? 'badge-success' : 'badge-warning'}`}>
+                            {savingsResult.data.idle ? 'IDLE VM' : 'ACTIVE / NON-IDLE'}
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     <div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>CPU Average</div>
                       <div style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--text-primary)', marginTop: '0.25rem' }}>
-                        {savingsResult.data.cpuAverage != null ? `${Number(savingsResult.data.cpuAverage).toFixed(2)}%` : 'CPU data unavailable'}
+                        {savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated')
+                          ? 'N/A (VM Powered Off)'
+                          : (savingsResult.data.cpuAverage != null ? `${Number(savingsResult.data.cpuAverage).toFixed(2)}%` : 'CPU data unavailable')}
                       </div>
                     </div>
                   </div>
@@ -367,7 +373,7 @@ const CostSavings = () => {
                       Retail Pricing Source
                     </div>
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-primary)', fontWeight: '600' }}>
-                      ${savingsResult.data.hourlyPrice != null ? Number(savingsResult.data.hourlyPrice).toFixed(4) : 'N/A'} {savingsResult.data.currency || 'USD'} / hr
+                      ₹{savingsResult.data.hourlyPrice != null ? Number(savingsResult.data.hourlyPrice).toFixed(4) : 'N/A'} INR / hr
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                       Source: {savingsResult.data.source || 'Azure Retail Prices API'}

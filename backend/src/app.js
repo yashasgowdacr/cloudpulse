@@ -1877,20 +1877,30 @@ async function calculateVmPotentialSavings(subscriptionId, resourceGroup, vmName
 
   const priceResult = await fetchVmRetailPrice(vmSize, region);
   const hourlyPrice = priceResult.dataFound ? priceResult.hourlyPrice : null;
-  const currency = priceResult.currency || 'USD';
+  let powerState = 'unknown';
+  try {
+    const instanceView = await computeClient.virtualMachines.instanceView(resourceGroup, vmName);
+    powerState = getVmPowerState(instanceView.statuses);
+  } catch (err) {}
+
+  const isStopped = (powerState === 'stopped' || powerState === 'deallocated');
 
   let cpuAverage = null;
   let isIdle = false;
   let idleReason = '';
 
-  try {
-    const metricsData = await fetchVmCpuMetrics(subscriptionId, resourceGroup, vmName, timespan, customCredential);
-    const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
-    cpuAverage = idleStatus.cpuAverage;
-    isIdle = idleStatus.idle;
-    idleReason = idleStatus.reason;
-  } catch (metricsErr) {
-    idleReason = `Failed to query metrics: ${metricsErr.message}`;
+  if (isStopped) {
+    idleReason = `VM is currently ${powerState.toUpperCase()}. Azure Monitor collects CPU metrics only when a VM is powered on.`;
+  } else {
+    try {
+      const metricsData = await fetchVmCpuMetrics(subscriptionId, resourceGroup, vmName, timespan, customCredential);
+      const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
+      cpuAverage = idleStatus.cpuAverage;
+      isIdle = idleStatus.idle;
+      idleReason = idleStatus.reason;
+    } catch (metricsErr) {
+      idleReason = `Failed to query metrics: ${metricsErr.message}`;
+    }
   }
 
   let potentialHourlySavings = 0;
@@ -1901,6 +1911,12 @@ async function calculateVmPotentialSavings(subscriptionId, resourceGroup, vmName
     potential30MinuteSavings = Math.round((hourlyPrice / 2) * 10000) / 10000;
   }
 
+  const responseReason = isStopped
+    ? `Virtual machine '${vmName}' is currently ${powerState}. Azure Monitor emits CPU metrics only when a VM is running. Potential hourly savings from further shutdown are 0 because it is already powered off.`
+    : (isIdle
+        ? `Virtual machine '${vmName}' is idle (${idleReason}). Potential compute savings calculated based on retail hourly rate.`
+        : `Virtual machine '${vmName}' is active or has insufficient CPU metrics during its running window. Potential savings are 0.`);
+
   return {
     vmName,
     resourceGroup,
@@ -1909,15 +1925,15 @@ async function calculateVmPotentialSavings(subscriptionId, resourceGroup, vmName
     hourlyPrice,
     currency,
     idle: isIdle,
+    isStopped,
+    powerState,
     cpuAverage,
     monitoringWindowMinutes: windowMinutes,
     potentialHourlySavings,
     potential30MinuteSavings,
     source: 'Azure Retail Prices API + Azure Monitor',
     isEstimate: true,
-    reason: isIdle
-      ? `Virtual machine '${vmName}' is idle (${idleReason}). Potential compute savings calculated based on retail hourly rate.`
-      : `Virtual machine '${vmName}' is not idle or has insufficient monitoring data. Potential savings are 0.`
+    reason: responseReason
   };
 }
 
