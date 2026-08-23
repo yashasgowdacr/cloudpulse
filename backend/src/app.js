@@ -1877,6 +1877,7 @@ async function calculateVmPotentialSavings(subscriptionId, resourceGroup, vmName
 
   const priceResult = await fetchVmRetailPrice(vmSize, region);
   const hourlyPrice = priceResult.dataFound ? priceResult.hourlyPrice : null;
+  const currency = priceResult.currency || 'USD';
   let powerState = 'unknown';
   try {
     const instanceView = await computeClient.virtualMachines.instanceView(resourceGroup, vmName);

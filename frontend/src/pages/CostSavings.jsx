@@ -319,25 +319,25 @@ const CostSavings = () => {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
                     <div style={{ backgroundColor: 'var(--bg-primary)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>
-                        Potential Hourly Savings
+                        {savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? 'Active Avoided Compute Cost' : 'Potential Hourly Savings'}
                       </div>
                       <div style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--status-success)', marginTop: '0.25rem' }}>
-                        ₹{Number(savingsResult.data.potentialHourlySavings || 0).toFixed(4)}
+                        ₹{Number(savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? (savingsResult.data.hourlyPrice || 0) : (savingsResult.data.potentialHourlySavings || 0)).toFixed(4)}
                       </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        INR / hour
+                        {savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? 'INR / hr (Saved while Deallocated)' : 'INR / hour'}
                       </div>
                     </div>
 
                     <div style={{ backgroundColor: 'var(--bg-primary)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>
-                        Potential 30-Min Savings
+                        {savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? 'Hourly Compute Billing' : 'Potential 30-Min Savings'}
                       </div>
                       <div style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--status-success)', marginTop: '0.25rem' }}>
-                        ₹{Number(savingsResult.data.potential30MinuteSavings || 0).toFixed(4)}
+                        ₹{Number(savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? 0 : (savingsResult.data.potential30MinuteSavings || 0)).toFixed(4)}
                       </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        INR per window
+                        {savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? 'INR / hr (Compute Paused)' : 'INR per window'}
                       </div>
                     </div>
                   </div>
@@ -348,7 +348,7 @@ const CostSavings = () => {
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>Idle Status</div>
                       <div style={{ marginTop: '0.25rem' }}>
                         {savingsResult.data.isStopped || (selectedVm?.status || '').toLowerCase().includes('stopped') || (selectedVm?.status || '').toLowerCase().includes('deallocated') ? (
-                          <span className="badge badge-info">ALREADY STOPPED</span>
+                          <span className="badge badge-info">DEALLOCATED (SAVINGS ACTIVE)</span>
                         ) : (
                           <span className={`badge ${savingsResult.data.idle ? 'badge-success' : 'badge-warning'}`}>
                             {savingsResult.data.idle ? 'IDLE VM' : 'ACTIVE / NON-IDLE'}
