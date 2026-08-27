@@ -1634,6 +1634,41 @@ const inFlightRequests = new Map();
 const COST_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes fresh cache TTL
 
 /**
+ * Helper to execute Azure Cost Management API queries with exponential backoff retries on HTTP 429.
+ */
+async function executeAzureCostQueryWithRetry(fn, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err.statusCode === 429 ||
+                    (err.response && err.response.status === 429) ||
+                    (err.message && err.message.includes('429')) ||
+                    (err.code && err.code.includes('429'));
+
+      if (is429 && attempt < maxRetries) {
+        let delayMs = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+        const retryAfterHeader = (err.response && err.response.headers && err.response.headers['retry-after']) ||
+                                 (err.headers && err.headers['retry-after']);
+        if (retryAfterHeader) {
+          const parsedSec = parseInt(retryAfterHeader, 10);
+          if (!isNaN(parsedSec) && parsedSec > 0 && parsedSec <= 30) {
+            delayMs = parsedSec * 1000;
+          }
+        }
+        const jitter = Math.floor(Math.random() * 400) - 200;
+        delayMs = Math.max(1000, delayMs + jitter);
+
+        console.warn(`[AZURE-COST-API] 429 Rate limit encountered. Attempt ${attempt + 1}/${maxRetries}. Retrying in ${delayMs}ms...`);
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
  * Persists a successful Azure Cost Management reading to PostgreSQL cost_cache table.
  */
 async function savePersistentCostCache({ userId, connectionId, subscriptionId, cacheType, resourceGroup = null, resourceName = null, totalCost, currency }) {
