@@ -1631,7 +1631,48 @@ app.get('/api/notifications/test', authenticateToken, requireRole('ADMIN'), asyn
 
 const costCache = new Map();
 const inFlightRequests = new Map();
+const throttleState = new Map();
 const COST_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes fresh cache TTL
+const CIRCUIT_BREAKER_TTL_MS = 5 * 60 * 1000; // 5 minutes circuit-breaker cooldown
+
+/**
+ * Checks if the circuit breaker is currently open (throttled) for the context.
+ */
+function isCircuitBreakerOpen(userId, connectionId, subscriptionId) {
+  const contextKey = `${userId}:${connectionId}:${subscriptionId}`;
+  const record = throttleState.get(contextKey);
+  if (!record) return false;
+  const now = Date.now();
+  if (now - record.throttledAt < record.cooldownMs) {
+    return true;
+  }
+  throttleState.delete(contextKey);
+  return false;
+}
+
+/**
+ * Records a 429 throttling event to trip the circuit breaker for the context.
+ */
+function recordCircuitBreakerThrottle(userId, connectionId, subscriptionId, retryAfterSec = null) {
+  const contextKey = `${userId}:${connectionId}:${subscriptionId}`;
+  let cooldownMs = CIRCUIT_BREAKER_TTL_MS;
+  if (retryAfterSec) {
+    const parsedSec = parseInt(retryAfterSec, 10);
+    if (!isNaN(parsedSec) && parsedSec > 0) {
+      cooldownMs = Math.max(60000, parsedSec * 1000);
+    }
+  }
+  throttleState.set(contextKey, { throttledAt: Date.now(), cooldownMs });
+  console.warn(`[AZURE-COST-API] Circuit breaker tripped for context '${contextKey}'. Cooldown: ${cooldownMs}ms`);
+}
+
+/**
+ * Clears the circuit breaker on a successful Azure Cost Management query.
+ */
+function clearCircuitBreaker(userId, connectionId, subscriptionId) {
+  const contextKey = `${userId}:${connectionId}:${subscriptionId}`;
+  throttleState.delete(contextKey);
+}
 
 /**
  * Helper to execute Azure Cost Management API queries with exponential backoff retries on HTTP 429.
@@ -1757,7 +1798,7 @@ async function getPersistentCostCache({ userId, connectionId, subscriptionId, ca
 
 /**
  * Fetches Subscription Month-to-Date cost with multi-tenant caching, in-flight request deduplication,
- * exponential backoff retry on 429, PostgreSQL persistent caching, and stale cache fallback.
+ * exponential backoff retry on 429, PostgreSQL persistent caching, circuit breaker, and stale cache fallback.
  */
 async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential = null, context = {}) {
   const userId = context.userId || 'system';
@@ -1778,6 +1819,24 @@ async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential
 
   // 3. Query PostgreSQL persistent cache to use as cold-start fallback if Azure throttles
   const dbSnapshot = await getPersistentCostCache({ userId, connectionId, subscriptionId, cacheType: 'MONTH_TO_DATE' });
+
+  // 4. Circuit-Breaker Check: If circuit is open (throttled), do NOT hit Azure API
+  if (isCircuitBreakerOpen(userId, connectionId, subscriptionId)) {
+    const fallbackData = cached ? cached.data : dbSnapshot;
+    if (fallbackData) {
+      console.warn(`[AZURE-COST-API] Circuit breaker open. Returning stale MTD cost data for key '${cacheKey}'`);
+      return {
+        ...fallbackData,
+        isStale: true,
+        staleReason: 'Azure Cost Management is temporarily throttling requests. Showing last known Azure cost.',
+        cachedAt: fallbackData.cachedAt || (cached ? new Date(cached.timestamp).toISOString() : new Date().toISOString())
+      };
+    }
+    const rateLimitErr = new Error('Azure Cost Management is temporarily throttling requests. Please try again shortly.');
+    rateLimitErr.statusCode = 429;
+    rateLimitErr.code = 'COST_DATA_TEMPORARILY_UNAVAILABLE';
+    throw rateLimitErr;
+  }
 
   const fetchPromise = (async () => {
     try {
@@ -1825,6 +1884,9 @@ async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential
         };
       });
 
+      // Clear circuit breaker state on success
+      clearCircuitBreaker(userId, connectionId, subscriptionId);
+
       // Update in-memory cache
       costCache.set(cacheKey, { timestamp: Date.now(), data });
 
@@ -1840,10 +1902,16 @@ async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential
 
       return data;
     } catch (err) {
-      const is429 = err.statusCode === 429 || 
-                    (err.response && err.response.status === 429) || 
+      const is429 = err.statusCode === 429 ||
+                    (err.response && err.response.status === 429) ||
                     (err.message && err.message.includes('429')) ||
                     (err.code && err.code.includes('429'));
+
+      if (is429) {
+        const retryAfterHeader = (err.response && err.response.headers && err.response.headers['retry-after']) ||
+                                 (err.headers && err.headers['retry-after']);
+        recordCircuitBreakerThrottle(userId, connectionId, subscriptionId, retryAfterHeader);
+      }
 
       // 4. Stale Cache Fallback: Prefer in-memory cache first, then PostgreSQL DB snapshot
       const fallbackData = cached ? cached.data : dbSnapshot;
@@ -1949,7 +2017,7 @@ app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {
 
 /**
  * Fetches Resource Month-to-Date cost with multi-tenant caching, in-flight request deduplication,
- * exponential backoff retry on 429, PostgreSQL persistent caching, and stale cache fallback.
+ * exponential backoff retry on 429, PostgreSQL persistent caching, circuit breaker, and stale cache fallback.
  */
 async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resourceName, customCredential = null, context = {}) {
   const userId = context.userId || 'system';
@@ -1967,6 +2035,24 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
   }
 
   const dbSnapshot = await getPersistentCostCache({ userId, connectionId, subscriptionId, cacheType: 'RESOURCE', resourceGroup, resourceName });
+
+  // Circuit-Breaker Check: If subscription is currently throttled, return PostgreSQL resource snapshot immediately
+  if (isCircuitBreakerOpen(userId, connectionId, subscriptionId)) {
+    const fallbackData = cached ? cached.data : dbSnapshot;
+    if (fallbackData) {
+      console.warn(`[AZURE-COST-API] Circuit breaker open. Returning stale Resource cost data for key '${cacheKey}'`);
+      return {
+        ...fallbackData,
+        isStale: true,
+        staleReason: 'Azure Cost Management is temporarily throttling requests. Showing last known Azure cost.',
+        cachedAt: fallbackData.cachedAt || (cached ? new Date(cached.timestamp).toISOString() : new Date().toISOString())
+      };
+    }
+    const rateLimitErr = new Error('Azure Cost Management is temporarily throttling requests. Please try again shortly.');
+    rateLimitErr.statusCode = 429;
+    rateLimitErr.code = 'COST_DATA_TEMPORARILY_UNAVAILABLE';
+    throw rateLimitErr;
+  }
 
   const fetchPromise = (async () => {
     try {
@@ -2051,6 +2137,8 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
         };
       });
 
+      clearCircuitBreaker(userId, connectionId, subscriptionId);
+
       costCache.set(cacheKey, { timestamp: Date.now(), data });
 
       await savePersistentCostCache({
@@ -2066,10 +2154,16 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
 
       return data;
     } catch (err) {
-      const is429 = err.statusCode === 429 || 
-                    (err.response && err.response.status === 429) || 
+      const is429 = err.statusCode === 429 ||
+                    (err.response && err.response.status === 429) ||
                     (err.message && err.message.includes('429')) ||
                     (err.code && err.code.includes('429'));
+
+      if (is429) {
+        const retryAfterHeader = (err.response && err.response.headers && err.response.headers['retry-after']) ||
+                                 (err.headers && err.headers['retry-after']);
+        recordCircuitBreakerThrottle(userId, connectionId, subscriptionId, retryAfterHeader);
+      }
 
       const fallbackData = cached ? cached.data : dbSnapshot;
       if (fallbackData) {
