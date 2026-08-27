@@ -682,7 +682,7 @@ async function getActions(userId, vmNameFilter = null) {
     query = `
       SELECT id, user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason, created_at
       FROM action_history
-      WHERE (user_id = $1 OR user_id IS NULL) AND LOWER(vm_name) = LOWER($2)
+      WHERE user_id = $1 AND LOWER(vm_name) = LOWER($2)
       ORDER BY created_at DESC
     `;
     values = [userId, vmNameFilter];
@@ -690,7 +690,7 @@ async function getActions(userId, vmNameFilter = null) {
     query = `
       SELECT id, user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason, created_at
       FROM action_history
-      WHERE (user_id = $1 OR user_id IS NULL)
+      WHERE user_id = $1
       ORDER BY created_at DESC
     `;
     values = [userId];
@@ -1062,54 +1062,102 @@ app.get('/azure/vms/:resourceGroup/:vmName/metrics', authenticateToken, async (r
 });
 
 app.get('/azure/vms/:resourceGroup/:vmName/idle', authenticateToken, async (req, res) => {
-  const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
-
-  if (!subscriptionId) {
-    return res.status(500).json({
-      error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
-    });
-  }
-
+  const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const { windowMinutes, threshold } = parseQueryOptions(req.query);
 
   try {
+    const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
+
+    if (!resolved.subscriptionId) {
+      return res.status(500).json({
+        error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
+      });
+    }
+
     const timespan = `PT${windowMinutes}M`;
-    const metricsData = await fetchVmCpuMetrics(subscriptionId, resourceGroup, vmName, timespan);
+    const metricsData = await fetchVmCpuMetrics(resolved.subscriptionId, resourceGroup, vmName, timespan, resolved.credential);
     const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
 
     return res.json(idleStatus);
   } catch (error) {
+    if (error.message && error.message.includes('Multiple active Azure connections found')) {
+      return res.status(400).json({
+        error: 'MULTIPLE_CONNECTIONS_REQUIRED',
+        message: error.message
+      });
+    }
+
+    if (error.message && (error.message.includes('not found') || error.message.includes('not active'))) {
+      return res.status(404).json({
+        error: 'CONNECTION_NOT_FOUND',
+        message: error.message
+      });
+    }
+
+    if (error.message && (error.message.includes('Invalid Connection ID') || error.message.includes('Invalid User ID'))) {
+      return res.status(400).json({
+        error: 'INVALID_REQUEST',
+        message: error.message
+      });
+    }
+
+    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to evaluate idle status';
+
     return res.status(500).json({
       error: `Failed to evaluate idle status for VM '${vmName}' in resource group '${resourceGroup}'`,
-      details: error.message
+      details: sanitizedMsg
     });
   }
 });
 
 app.get('/azure/vms/:resourceGroup/:vmName/policy', authenticateToken, async (req, res) => {
-  const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
-
-  if (!subscriptionId) {
-    return res.status(500).json({
-      error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
-    });
-  }
-
+  const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const { windowMinutes, threshold, environment, autoShutdown } = parseQueryOptions(req.query);
 
   try {
+    const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
+
+    if (!resolved.subscriptionId) {
+      return res.status(500).json({
+        error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
+      });
+    }
+
     const timespan = `PT${windowMinutes}M`;
-    const metricsData = await fetchVmCpuMetrics(subscriptionId, resourceGroup, vmName, timespan);
+    const metricsData = await fetchVmCpuMetrics(resolved.subscriptionId, resourceGroup, vmName, timespan, resolved.credential);
     const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
     const policyResult = evaluateShutdownPolicy(vmName, idleStatus, environment, autoShutdown);
 
     return res.json(policyResult);
   } catch (error) {
+    if (error.message && error.message.includes('Multiple active Azure connections found')) {
+      return res.status(400).json({
+        error: 'MULTIPLE_CONNECTIONS_REQUIRED',
+        message: error.message
+      });
+    }
+
+    if (error.message && (error.message.includes('not found') || error.message.includes('not active'))) {
+      return res.status(404).json({
+        error: 'CONNECTION_NOT_FOUND',
+        message: error.message
+      });
+    }
+
+    if (error.message && (error.message.includes('Invalid Connection ID') || error.message.includes('Invalid User ID'))) {
+      return res.status(400).json({
+        error: 'INVALID_REQUEST',
+        message: error.message
+      });
+    }
+
+    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to evaluate policy';
+
     return res.status(500).json({
       error: `Failed to evaluate policy for VM '${vmName}' in resource group '${resourceGroup}'`,
-      details: error.message
+      details: sanitizedMsg
     });
   }
 });
@@ -1235,9 +1283,11 @@ app.post('/azure/vms/:resourceGroup/:vmName/shutdown', authenticateToken, async 
 app.post('/azure/vms/:resourceGroup/:vmName/start', authenticateToken, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
+  let resolvedConnId = null;
 
   try {
     const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
+    resolvedConnId = resolved ? resolved.connectionId : null;
 
     if (!resolved.subscriptionId) {
       return res.status(500).json({
@@ -1275,7 +1325,7 @@ app.post('/azure/vms/:resourceGroup/:vmName/start', authenticateToken, async (re
     try {
       await recordAction({
         userId: req.user.id,
-        connectionId: null,
+        connectionId: resolvedConnId,
         vmName,
         action: 'START',
         status: 'FAILED',
