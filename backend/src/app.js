@@ -1624,66 +1624,144 @@ app.get('/api/notifications/test', authenticateToken, requireRole('ADMIN'), asyn
 });
 
 const costCache = new Map();
+const inFlightRequests = new Map();
+const COST_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes fresh cache TTL
 
-async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential = null) {
-  const cacheKey = subscriptionId;
-  const cached = costCache.get(cacheKey);
+/**
+ * Helper to execute Azure Cost Management API queries with exponential backoff retries on HTTP 429.
+ */
+async function executeAzureCostQueryWithRetry(fn, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err.statusCode === 429 || 
+                    (err.response && err.response.status === 429) || 
+                    (err.message && err.message.includes('429')) ||
+                    (err.code && err.code.includes('429'));
+
+      if (is429 && attempt < maxRetries) {
+        let delayMs = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+        const retryAfterHeader = (err.response && err.response.headers && err.response.headers['retry-after']) || 
+                                 (err.headers && err.headers['retry-after']);
+        if (retryAfterHeader) {
+          const parsedSec = parseInt(retryAfterHeader, 10);
+          if (!isNaN(parsedSec) && parsedSec > 0 && parsedSec <= 30) {
+            delayMs = parsedSec * 1000;
+          }
+        }
+        const jitter = Math.floor(Math.random() * 400) - 200;
+        delayMs = Math.max(1000, delayMs + jitter);
+
+        console.warn(`[AZURE-COST-API] 429 Rate limit encountered. Attempt ${attempt + 1}/${maxRetries}. Retrying in ${delayMs}ms...`);
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
+ * Fetches Subscription Month-to-Date cost with multi-tenant caching, in-flight request deduplication,
+ * exponential backoff retry on 429, and stale cache fallback.
+ */
+async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential = null, context = {}) {
+  const userId = context.userId || 'system';
+  const connectionId = context.connectionId || 'default';
+  const cacheKey = `cost:mtd:${userId}:${connectionId}:${subscriptionId}`;
   const now = Date.now();
+  const cached = costCache.get(cacheKey);
 
-  if (cached && (now - cached.timestamp < 60000)) {
+  // 1. Return fresh cached data if within 10-minute TTL
+  if (cached && (now - cached.timestamp < COST_CACHE_TTL_MS)) {
     return cached.data;
   }
 
-  const credential = customCredential || new DefaultAzureCredential();
-  const costClient = new CostManagementClient(credential);
-  const scope = `/subscriptions/${subscriptionId}`;
-
-  const queryParameters = {
-    type: 'Usage',
-    timeframe: 'MonthToDate',
-    dataset: {
-      granularity: 'None',
-      aggregation: {
-        totalCost: {
-          name: 'PreTaxCost',
-          function: 'Sum'
-        }
-      }
-    }
-  };
-
-  try {
-    const result = await costClient.query.usage(scope, queryParameters);
-
-    let totalCost = 0;
-    let currency = 'INR';
-
-    if (result && result.rows && Array.isArray(result.rows) && result.rows.length > 0) {
-      const row = result.rows[0];
-      const costValue = parseFloat(row[0]);
-      if (!isNaN(costValue)) {
-        totalCost = Math.round(costValue * 100) / 100;
-      }
-      if (row[1] && typeof row[1] === 'string') {
-        currency = row[1];
-      }
-    }
-
-    const data = {
-      totalCost,
-      currency: currency || 'INR',
-      timeframe: 'MonthToDate',
-      source: 'Azure Cost Management'
-    };
-
-    costCache.set(cacheKey, { timestamp: now, data });
-    return data;
-  } catch (err) {
-    if (cached) {
-      return cached.data;
-    }
-    throw err;
+  // 2. Request Deduplication: Await existing in-flight Promise for identical key
+  if (inFlightRequests.has(cacheKey)) {
+    return await inFlightRequests.get(cacheKey);
   }
+
+  const fetchPromise = (async () => {
+    try {
+      const data = await executeAzureCostQueryWithRetry(async () => {
+        const credential = customCredential || new DefaultAzureCredential();
+        const costClient = new CostManagementClient(credential);
+        const scope = `/subscriptions/${subscriptionId}`;
+
+        const queryParameters = {
+          type: 'Usage',
+          timeframe: 'MonthToDate',
+          dataset: {
+            granularity: 'None',
+            aggregation: {
+              totalCost: {
+                name: 'PreTaxCost',
+                function: 'Sum'
+              }
+            }
+          }
+        };
+
+        const result = await costClient.query.usage(scope, queryParameters);
+
+        let totalCost = 0;
+        let currency = 'INR';
+
+        if (result && result.rows && Array.isArray(result.rows) && result.rows.length > 0) {
+          const row = result.rows[0];
+          const costValue = parseFloat(row[0]);
+          if (!isNaN(costValue)) {
+            totalCost = Math.round(costValue * 100) / 100;
+          }
+          if (row[1] && typeof row[1] === 'string') {
+            currency = row[1];
+          }
+        }
+
+        return {
+          totalCost,
+          currency: currency || 'INR',
+          timeframe: 'MonthToDate',
+          source: 'Azure Cost Management',
+          isStale: false
+        };
+      });
+
+      costCache.set(cacheKey, { timestamp: Date.now(), data });
+      return data;
+    } catch (err) {
+      const is429 = err.statusCode === 429 || 
+                    (err.response && err.response.status === 429) || 
+                    (err.message && err.message.includes('429')) ||
+                    (err.code && err.code.includes('429'));
+
+      // 3. Stale Cache Fallback: If 429/throttled or error occurs, return existing cached data safely
+      if (cached) {
+        console.warn(`[AZURE-COST-API] Throttled/Error. Returning stale cached MTD cost data for key '${cacheKey}'`);
+        return {
+          ...cached.data,
+          isStale: true,
+          staleReason: 'Azure Cost Management is temporarily throttling requests. Displaying cached data.'
+        };
+      }
+
+      if (is429) {
+        const rateLimitErr = new Error('Azure Cost Management is temporarily throttling requests. Please try again shortly.');
+        rateLimitErr.statusCode = 429;
+        rateLimitErr.code = 'COST_DATA_TEMPORARILY_UNAVAILABLE';
+        throw rateLimitErr;
+      }
+
+      throw err;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+  return await fetchPromise;
 }
 
 app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {
@@ -1698,7 +1776,11 @@ app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {
       });
     }
 
-    const costData = await fetchSubscriptionMonthToDateCost(resolved.subscriptionId, resolved.credential);
+    const costData = await fetchSubscriptionMonthToDateCost(
+      resolved.subscriptionId, 
+      resolved.credential, 
+      { userId: req.user.id, connectionId: resolved.connectionId }
+    );
     return res.json(costData);
   } catch (error) {
     if (error.message && error.message.includes('Multiple active Azure connections found')) {
@@ -1722,11 +1804,10 @@ app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {
       });
     }
 
-    if (error.statusCode === 429) {
+    if (error.statusCode === 429 || error.code === 'COST_DATA_TEMPORARILY_UNAVAILABLE') {
       return res.status(429).json({
-        error: 'RATE_LIMIT_EXCEEDED',
-        message: 'Azure Cost Management API rate limit exceeded. Please retry shortly.',
-        details: error.message
+        error: 'COST_DATA_TEMPORARILY_UNAVAILABLE',
+        message: 'Azure Cost Management is temporarily throttling requests. Please try again shortly.'
       });
     }
 
@@ -1756,84 +1837,140 @@ app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {
   }
 });
 
-async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resourceName, customCredential = null) {
-  const credential = customCredential || new DefaultAzureCredential();
-  const costClient = new CostManagementClient(credential);
-  const scope = `/subscriptions/${subscriptionId}`;
+/**
+ * Fetches Resource Month-to-Date cost with multi-tenant caching, in-flight request deduplication,
+ * exponential backoff retry on 429, and stale cache fallback.
+ */
+async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resourceName, customCredential = null, context = {}) {
+  const userId = context.userId || 'system';
+  const connectionId = context.connectionId || 'default';
+  const cacheKey = `cost:resource:${userId}:${connectionId}:${subscriptionId}:${resourceGroup.toLowerCase()}:${resourceName.toLowerCase()}`;
+  const now = Date.now();
+  const cached = costCache.get(cacheKey);
 
-  const queryParameters = {
-    type: 'Usage',
-    timeframe: 'MonthToDate',
-    dataset: {
-      granularity: 'None',
-      aggregation: {
-        totalCost: {
-          name: 'PreTaxCost',
-          function: 'Sum'
-        }
-      },
-      grouping: [
-        { type: 'Dimension', name: 'ResourceId' },
-        { type: 'Dimension', name: 'ResourceGroupName' },
-        { type: 'Dimension', name: 'ResourceType' }
-      ]
-    }
-  };
-
-  const result = await costClient.query.usage(scope, queryParameters);
-
-  let totalCost = 0;
-  let currency = 'USD';
-  let dataFound = false;
-
-  const targetRgLower = resourceGroup.toLowerCase();
-  const targetNameLower = resourceName.toLowerCase();
-
-  if (result && result.columns && result.rows && Array.isArray(result.rows)) {
-    const costIdx = result.columns.findIndex(c => c.name === 'PreTaxCost');
-    const currencyIdx = result.columns.findIndex(c => c.name === 'Currency');
-    const resourceIdIdx = result.columns.findIndex(c => c.name === 'ResourceId');
-    const rgIdx = result.columns.findIndex(c => c.name === 'ResourceGroupName');
-
-    for (const row of result.rows) {
-      const rowCurrency = (currencyIdx !== -1 && row[currencyIdx]) ? row[currencyIdx] : 'USD';
-      if (rowCurrency) currency = rowCurrency;
-
-      const rowResourceId = (resourceIdIdx !== -1 && row[resourceIdIdx]) ? String(row[resourceIdIdx]) : '';
-      const rowRg = (rgIdx !== -1 && row[rgIdx]) ? String(row[rgIdx]) : '';
-
-      const rgMatches = (rowRg && rowRg.toLowerCase() === targetRgLower) ||
-                        (rowResourceId && rowResourceId.toLowerCase().includes(`/resourcegroups/${targetRgLower}/`));
-
-      const nameMatches = rowResourceId && (
-        rowResourceId.toLowerCase().endsWith(`/${targetNameLower}`) ||
-        rowResourceId.toLowerCase().includes(`/${targetNameLower}/`)
-      );
-
-      if (rgMatches && nameMatches) {
-        const costVal = parseFloat(row[costIdx !== -1 ? costIdx : 0]);
-        if (!isNaN(costVal)) {
-          totalCost += costVal;
-          dataFound = true;
-        }
-      }
-    }
+  if (cached && (now - cached.timestamp < COST_CACHE_TTL_MS)) {
+    return cached.data;
   }
 
-  totalCost = Math.round(totalCost * 100) / 100;
+  if (inFlightRequests.has(cacheKey)) {
+    return await inFlightRequests.get(cacheKey);
+  }
 
-  return {
-    resourceName,
-    resourceGroup,
-    totalCost,
-    currency,
-    timeframe: 'MonthToDate',
-    source: 'Azure Cost Management',
-    dataFound,
-    reason: dataFound
-      ? `Matching cost record found for resource '${resourceName}'.`
-      : `No matching billing record found for resource '${resourceName}' in resource group '${resourceGroup}' for the current month-to-date period.`
-  };
+  const fetchPromise = (async () => {
+    try {
+      const data = await executeAzureCostQueryWithRetry(async () => {
+        const credential = customCredential || new DefaultAzureCredential();
+        const costClient = new CostManagementClient(credential);
+        const scope = `/subscriptions/${subscriptionId}`;
+
+        const queryParameters = {
+          type: 'Usage',
+          timeframe: 'MonthToDate',
+          dataset: {
+            granularity: 'None',
+            aggregation: {
+              totalCost: {
+                name: 'PreTaxCost',
+                function: 'Sum'
+              }
+            },
+            grouping: [
+              { type: 'Dimension', name: 'ResourceId' },
+              { type: 'Dimension', name: 'ResourceGroupName' },
+              { type: 'Dimension', name: 'ResourceType' }
+            ]
+          }
+        };
+
+        const result = await costClient.query.usage(scope, queryParameters);
+
+        let totalCost = 0;
+        let currency = 'USD';
+        let dataFound = false;
+
+        const targetRgLower = resourceGroup.toLowerCase();
+        const targetNameLower = resourceName.toLowerCase();
+
+        if (result && result.columns && result.rows && Array.isArray(result.rows)) {
+          const costIdx = result.columns.findIndex(c => c.name === 'PreTaxCost');
+          const currencyIdx = result.columns.findIndex(c => c.name === 'Currency');
+          const resourceIdIdx = result.columns.findIndex(c => c.name === 'ResourceId');
+          const rgIdx = result.columns.findIndex(c => c.name === 'ResourceGroupName');
+
+          for (const row of result.rows) {
+            const rowCurrency = (currencyIdx !== -1 && row[currencyIdx]) ? row[currencyIdx] : 'USD';
+            if (rowCurrency) currency = rowCurrency;
+
+            const rowResourceId = (resourceIdIdx !== -1 && row[resourceIdIdx]) ? String(row[resourceIdIdx]) : '';
+            const rowRg = (rgIdx !== -1 && row[rgIdx]) ? String(row[rgIdx]) : '';
+
+            const rgMatches = (rowRg && rowRg.toLowerCase() === targetRgLower) ||
+                              (rowResourceId && rowResourceId.toLowerCase().includes(`/resourcegroups/${targetRgLower}/`));
+
+            const nameMatches = rowResourceId && (
+              rowResourceId.toLowerCase().endsWith(`/${targetNameLower}`) ||
+              rowResourceId.toLowerCase().includes(`/${targetNameLower}/`)
+            );
+
+            if (rgMatches && nameMatches) {
+              const costVal = parseFloat(row[costIdx !== -1 ? costIdx : 0]);
+              if (!isNaN(costVal)) {
+                totalCost += costVal;
+                dataFound = true;
+              }
+            }
+          }
+        }
+
+        totalCost = Math.round(totalCost * 100) / 100;
+
+        return {
+          resourceName,
+          resourceGroup,
+          totalCost,
+          currency,
+          timeframe: 'MonthToDate',
+          source: 'Azure Cost Management',
+          dataFound,
+          isStale: false,
+          reason: dataFound
+            ? `Matching cost record found for resource '${resourceName}'.`
+            : `No matching billing record found for resource '${resourceName}' in resource group '${resourceGroup}' for the current month-to-date period.`
+        };
+      });
+
+      costCache.set(cacheKey, { timestamp: Date.now(), data });
+      return data;
+    } catch (err) {
+      const is429 = err.statusCode === 429 || 
+                    (err.response && err.response.status === 429) || 
+                    (err.message && err.message.includes('429')) ||
+                    (err.code && err.code.includes('429'));
+
+      if (cached) {
+        console.warn(`[AZURE-COST-API] Throttled/Error. Returning stale cached Resource cost data for key '${cacheKey}'`);
+        return {
+          ...cached.data,
+          isStale: true,
+          staleReason: 'Azure Cost Management is temporarily throttling requests. Displaying cached data.'
+        };
+      }
+
+      if (is429) {
+        const rateLimitErr = new Error('Azure Cost Management is temporarily throttling requests. Please try again shortly.');
+        rateLimitErr.statusCode = 429;
+        rateLimitErr.code = 'COST_DATA_TEMPORARILY_UNAVAILABLE';
+        throw rateLimitErr;
+      }
+
+      throw err;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+  return await fetchPromise;
 }
 
 app.get('/api/cost/resource/:resourceGroup/:resourceName', authenticateToken, async (req, res) => {
@@ -1849,7 +1986,13 @@ app.get('/api/cost/resource/:resourceGroup/:resourceName', authenticateToken, as
       });
     }
 
-    const costData = await fetchResourceMonthToDateCost(resolved.subscriptionId, resourceGroup, resourceName, resolved.credential);
+    const costData = await fetchResourceMonthToDateCost(
+      resolved.subscriptionId, 
+      resourceGroup, 
+      resourceName, 
+      resolved.credential,
+      { userId: req.user.id, connectionId: resolved.connectionId }
+    );
     return res.json(costData);
   } catch (error) {
     if (error.message && error.message.includes('Multiple active Azure connections found')) {
@@ -1873,11 +2016,10 @@ app.get('/api/cost/resource/:resourceGroup/:resourceName', authenticateToken, as
       });
     }
 
-    if (error.statusCode === 429) {
+    if (error.statusCode === 429 || error.code === 'COST_DATA_TEMPORARILY_UNAVAILABLE') {
       return res.status(429).json({
-        error: 'RATE_LIMIT_EXCEEDED',
-        message: 'Azure Cost Management API rate limit exceeded. Please retry shortly.',
-        details: error.message
+        error: 'COST_DATA_TEMPORARILY_UNAVAILABLE',
+        message: 'Azure Cost Management is temporarily throttling requests. Please try again shortly.'
       });
     }
 

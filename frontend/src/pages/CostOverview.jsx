@@ -64,8 +64,8 @@ const CostOverview = () => {
     } catch (err) {
       if (err.response?.data?.error === 'MULTIPLE_CONNECTIONS_REQUIRED') {
         setMtdCost({ loading: false, data: null, error: 'Multiple active Azure connections found. Please select a connection above.' });
-      } else if (err.response?.status === 429) {
-        setMtdCost({ loading: false, data: null, error: 'Azure Cost Management API rate limit exceeded. Please retry shortly.' });
+      } else if (err.response?.data?.error === 'COST_DATA_TEMPORARILY_UNAVAILABLE' || err.response?.status === 429) {
+        setMtdCost({ loading: false, data: null, error: 'Azure Cost Management API is temporarily throttling requests. Please retry shortly.' });
       } else if (err.response?.status === 403) {
         setMtdCost({ loading: false, data: null, error: 'Insufficient Azure permissions to access Azure Cost Management API.' });
       } else {
@@ -98,14 +98,14 @@ const CostOverview = () => {
 
   useEffect(() => {
     fetchConnections();
-  }, [fetchConnections]);
+  }, []);
 
   useEffect(() => {
-    if (selectedConnectionId || connections.length === 1) {
+    if (selectedConnectionId || (connections.length === 1 && !connLoading)) {
       fetchMtdCost();
       fetchDiscoveredResources();
     }
-  }, [selectedConnectionId, fetchMtdCost, fetchDiscoveredResources, connections.length]);
+  }, [selectedConnectionId, connLoading]);
 
   // 4. Resource Cost Lookup Handler
   const handleResourceLookup = async (rg, name) => {
