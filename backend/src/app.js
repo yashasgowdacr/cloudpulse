@@ -18,6 +18,7 @@ const { authenticateToken, requireRole } = require('./middleware/auth');
 const { getAzureCredentialForUser } = require('./services/azureConnectionResolver');
 const { getPolicyForUser } = require('./services/optimizationPolicyService');
 const { getEncryptionKey } = require('./utils/crypto');
+const { runMigrations } = require('./db/migrate');
 const db = require('./db');
 
 // Validate critical production encryption key on application startup
@@ -29,6 +30,11 @@ try {
     process.exit(1);
   }
 }
+
+// Auto-run database schema migrations idempotently on startup
+runMigrations().catch((migErr) => {
+  console.error('[STARTUP-MIGRATION-ERROR] Failed to run schema migrations:', migErr.message);
+});
 
 const app = express();
 
@@ -1628,43 +1634,95 @@ const inFlightRequests = new Map();
 const COST_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes fresh cache TTL
 
 /**
- * Helper to execute Azure Cost Management API queries with exponential backoff retries on HTTP 429.
+ * Persists a successful Azure Cost Management reading to PostgreSQL cost_cache table.
  */
-async function executeAzureCostQueryWithRetry(fn, maxRetries = 3) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const is429 = err.statusCode === 429 || 
-                    (err.response && err.response.status === 429) || 
-                    (err.message && err.message.includes('429')) ||
-                    (err.code && err.code.includes('429'));
+async function savePersistentCostCache({ userId, connectionId, subscriptionId, cacheType, resourceGroup = null, resourceName = null, totalCost, currency }) {
+  if (!userId || !subscriptionId) return;
 
-      if (is429 && attempt < maxRetries) {
-        let delayMs = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
-        const retryAfterHeader = (err.response && err.response.headers && err.response.headers['retry-after']) || 
-                                 (err.headers && err.headers['retry-after']);
-        if (retryAfterHeader) {
-          const parsedSec = parseInt(retryAfterHeader, 10);
-          if (!isNaN(parsedSec) && parsedSec > 0 && parsedSec <= 30) {
-            delayMs = parsedSec * 1000;
-          }
-        }
-        const jitter = Math.floor(Math.random() * 400) - 200;
-        delayMs = Math.max(1000, delayMs + jitter);
+  try {
+    const rgClean = resourceGroup ? resourceGroup.trim() : null;
+    const nameClean = resourceName ? resourceName.trim() : null;
 
-        console.warn(`[AZURE-COST-API] 429 Rate limit encountered. Attempt ${attempt + 1}/${maxRetries}. Retrying in ${delayMs}ms...`);
-        await new Promise(r => setTimeout(r, delayMs));
-        continue;
-      }
-      throw err;
+    if (cacheType === 'MONTH_TO_DATE') {
+      await db.query(
+        `INSERT INTO cost_cache (user_id, connection_id, subscription_id, cache_type, total_cost, currency, cached_at, updated_at)
+         VALUES ($1, $2, $3, 'MONTH_TO_DATE', $4, $5, NOW(), NOW())
+         ON CONFLICT (user_id, connection_id, subscription_id) WHERE cache_type = 'MONTH_TO_DATE'
+         DO UPDATE SET total_cost = EXCLUDED.total_cost, currency = EXCLUDED.currency, cached_at = NOW(), updated_at = NOW()`,
+        [userId, connectionId, subscriptionId, totalCost, currency]
+      );
+    } else if (cacheType === 'RESOURCE') {
+      await db.query(
+        `INSERT INTO cost_cache (user_id, connection_id, subscription_id, cache_type, resource_group, resource_name, total_cost, currency, cached_at, updated_at)
+         VALUES ($1, $2, $3, 'RESOURCE', $4, $5, $6, $7, NOW(), NOW())
+         ON CONFLICT (user_id, connection_id, subscription_id, LOWER(resource_group), LOWER(resource_name)) WHERE cache_type = 'RESOURCE'
+         DO UPDATE SET total_cost = EXCLUDED.total_cost, currency = EXCLUDED.currency, cached_at = NOW(), updated_at = NOW()`,
+        [userId, connectionId, subscriptionId, rgClean, nameClean, totalCost, currency]
+      );
     }
+  } catch (err) {
+    console.error('[COST-CACHE-DB] Failed to persist cost snapshot:', err.message);
   }
 }
 
 /**
+ * Retrieves last known successful cost snapshot from PostgreSQL cost_cache table.
+ */
+async function getPersistentCostCache({ userId, connectionId, subscriptionId, cacheType, resourceGroup = null, resourceName = null }) {
+  if (!userId || !subscriptionId) return null;
+
+  try {
+    if (cacheType === 'MONTH_TO_DATE') {
+      const res = await db.query(
+        `SELECT total_cost, currency, cached_at
+         FROM cost_cache
+         WHERE user_id = $1 AND connection_id = $2 AND subscription_id = $3 AND cache_type = 'MONTH_TO_DATE'
+         LIMIT 1`,
+        [userId, connectionId, subscriptionId]
+      );
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        return {
+          totalCost: parseFloat(row.total_cost),
+          currency: row.currency,
+          cachedAt: row.cached_at,
+          timeframe: 'MonthToDate',
+          source: 'Azure Cost Management (Persistent Cache)'
+        };
+      }
+    } else if (cacheType === 'RESOURCE' && resourceGroup && resourceName) {
+      const res = await db.query(
+        `SELECT total_cost, currency, cached_at
+         FROM cost_cache
+         WHERE user_id = $1 AND connection_id = $2 AND subscription_id = $3 AND cache_type = 'RESOURCE'
+           AND LOWER(resource_group) = LOWER($4) AND LOWER(resource_name) = LOWER($5)
+         LIMIT 1`,
+        [userId, connectionId, subscriptionId, resourceGroup.trim(), resourceName.trim()]
+      );
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        return {
+          resourceName,
+          resourceGroup,
+          totalCost: parseFloat(row.total_cost),
+          currency: row.currency,
+          cachedAt: row.cached_at,
+          timeframe: 'MonthToDate',
+          dataFound: true,
+          source: 'Azure Cost Management (Persistent Cache)'
+        };
+      }
+    }
+  } catch (err) {
+    console.error('[COST-CACHE-DB] Failed to read persistent cost snapshot:', err.message);
+  }
+
+  return null;
+}
+
+/**
  * Fetches Subscription Month-to-Date cost with multi-tenant caching, in-flight request deduplication,
- * exponential backoff retry on 429, and stale cache fallback.
+ * exponential backoff retry on 429, PostgreSQL persistent caching, and stale cache fallback.
  */
 async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential = null, context = {}) {
   const userId = context.userId || 'system';
@@ -1682,6 +1740,9 @@ async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential
   if (inFlightRequests.has(cacheKey)) {
     return await inFlightRequests.get(cacheKey);
   }
+
+  // 3. Query PostgreSQL persistent cache to use as cold-start fallback if Azure throttles
+  const dbSnapshot = await getPersistentCostCache({ userId, connectionId, subscriptionId, cacheType: 'MONTH_TO_DATE' });
 
   const fetchPromise = (async () => {
     try {
@@ -1729,7 +1790,19 @@ async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential
         };
       });
 
+      // Update in-memory cache
       costCache.set(cacheKey, { timestamp: Date.now(), data });
+
+      // Persist successful reading to PostgreSQL
+      await savePersistentCostCache({
+        userId,
+        connectionId,
+        subscriptionId,
+        cacheType: 'MONTH_TO_DATE',
+        totalCost: data.totalCost,
+        currency: data.currency
+      });
+
       return data;
     } catch (err) {
       const is429 = err.statusCode === 429 || 
@@ -1737,13 +1810,15 @@ async function fetchSubscriptionMonthToDateCost(subscriptionId, customCredential
                     (err.message && err.message.includes('429')) ||
                     (err.code && err.code.includes('429'));
 
-      // 3. Stale Cache Fallback: If 429/throttled or error occurs, return existing cached data safely
-      if (cached) {
+      // 4. Stale Cache Fallback: Prefer in-memory cache first, then PostgreSQL DB snapshot
+      const fallbackData = cached ? cached.data : dbSnapshot;
+      if (fallbackData) {
         console.warn(`[AZURE-COST-API] Throttled/Error. Returning stale cached MTD cost data for key '${cacheKey}'`);
         return {
-          ...cached.data,
+          ...fallbackData,
           isStale: true,
-          staleReason: 'Azure Cost Management is temporarily throttling requests. Displaying cached data.'
+          staleReason: 'Azure Cost Management is temporarily throttling requests. Showing last known Azure cost.',
+          cachedAt: fallbackData.cachedAt || (cached ? new Date(cached.timestamp).toISOString() : new Date().toISOString())
         };
       }
 
@@ -1839,7 +1914,7 @@ app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {
 
 /**
  * Fetches Resource Month-to-Date cost with multi-tenant caching, in-flight request deduplication,
- * exponential backoff retry on 429, and stale cache fallback.
+ * exponential backoff retry on 429, PostgreSQL persistent caching, and stale cache fallback.
  */
 async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resourceName, customCredential = null, context = {}) {
   const userId = context.userId || 'system';
@@ -1855,6 +1930,8 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
   if (inFlightRequests.has(cacheKey)) {
     return await inFlightRequests.get(cacheKey);
   }
+
+  const dbSnapshot = await getPersistentCostCache({ userId, connectionId, subscriptionId, cacheType: 'RESOURCE', resourceGroup, resourceName });
 
   const fetchPromise = (async () => {
     try {
@@ -1940,6 +2017,18 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
       });
 
       costCache.set(cacheKey, { timestamp: Date.now(), data });
+
+      await savePersistentCostCache({
+        userId,
+        connectionId,
+        subscriptionId,
+        cacheType: 'RESOURCE',
+        resourceGroup,
+        resourceName,
+        totalCost: data.totalCost,
+        currency: data.currency
+      });
+
       return data;
     } catch (err) {
       const is429 = err.statusCode === 429 || 
@@ -1947,12 +2036,14 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
                     (err.message && err.message.includes('429')) ||
                     (err.code && err.code.includes('429'));
 
-      if (cached) {
+      const fallbackData = cached ? cached.data : dbSnapshot;
+      if (fallbackData) {
         console.warn(`[AZURE-COST-API] Throttled/Error. Returning stale cached Resource cost data for key '${cacheKey}'`);
         return {
-          ...cached.data,
+          ...fallbackData,
           isStale: true,
-          staleReason: 'Azure Cost Management is temporarily throttling requests. Displaying cached data.'
+          staleReason: 'Azure Cost Management is temporarily throttling requests. Showing last known Azure cost.',
+          cachedAt: fallbackData.cachedAt || (cached ? new Date(cached.timestamp).toISOString() : new Date().toISOString())
         };
       }
 

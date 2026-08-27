@@ -94,4 +94,27 @@ CREATE INDEX IF NOT EXISTS idx_action_history_user_id ON action_history (user_id
 CREATE INDEX IF NOT EXISTS idx_action_history_user_created ON action_history (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_action_history_user_conn ON action_history (user_id, connection_id);
 
+-- 6. Persistent Cost Cache Table (Phase 4F / Cost Resilience)
+CREATE TABLE IF NOT EXISTS cost_cache (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    connection_id UUID REFERENCES azure_connections(id) ON DELETE CASCADE,
+    subscription_id VARCHAR(64) NOT NULL,
+    cache_type VARCHAR(50) NOT NULL DEFAULT 'MONTH_TO_DATE',
+    resource_group VARCHAR(255),
+    resource_name VARCHAR(255),
+    total_cost NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+    cached_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_cache_mtd_unique
+ON cost_cache (user_id, connection_id, subscription_id)
+WHERE cache_type = 'MONTH_TO_DATE';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_cache_resource_unique
+ON cost_cache (user_id, connection_id, subscription_id, LOWER(resource_group), LOWER(resource_name))
+WHERE cache_type = 'RESOURCE';
 

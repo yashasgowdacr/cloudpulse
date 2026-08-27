@@ -247,15 +247,38 @@ const CostOverview = () => {
             ) : (
               <div>
                 <div style={{ fontSize: '2.5rem', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>
-                  ${mtdCost.data?.amount != null ? Number(mtdCost.data.amount).toFixed(2) : '0.00'}{' '}
+                  ${mtdCost.data?.totalCost != null ? Number(mtdCost.data.totalCost).toFixed(2) : (mtdCost.data?.amount != null ? Number(mtdCost.data.amount).toFixed(2) : '0.00')}{' '}
                   <span style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-secondary)' }}>
                     {mtdCost.data?.currency || 'USD'}
                   </span>
                 </div>
 
+                {mtdCost.data?.isStale && (
+                  <div style={{
+                    backgroundColor: 'rgba(234, 179, 8, 0.12)',
+                    border: '1px solid rgba(234, 179, 8, 0.3)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.5rem 0.75rem',
+                    marginBottom: '0.75rem',
+                    fontSize: '0.78125rem',
+                    color: '#eab308',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.25rem'
+                  }}>
+                    <strong style={{ fontWeight: '600' }}>⚠️ Showing last known Azure cost</strong>
+                    <span>{mtdCost.data.staleReason || 'Azure Cost Management is temporarily throttling requests.'}</span>
+                    {mtdCost.data.cachedAt && (
+                      <span style={{ opacity: 0.85, fontSize: '0.75rem' }}>
+                        Last updated: {new Date(mtdCost.data.cachedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                   <div>Timeframe: <strong style={{ color: 'var(--text-primary)' }}>MonthToDate</strong></div>
-                  <div>Source: <strong style={{ color: 'var(--accent-primary)' }}>Azure Cost Management API</strong></div>
+                  <div>Source: <strong style={{ color: 'var(--accent-primary)' }}>{mtdCost.data?.source || 'Azure Cost Management API'}</strong></div>
                 </div>
               </div>
             )}
