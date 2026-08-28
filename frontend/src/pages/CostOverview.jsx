@@ -17,6 +17,30 @@ import {
   Layers
 } from 'lucide-react';
 
+const formatCurrency = (amount, currencyCode = 'USD') => {
+  const num = Number(amount || 0);
+  const formattedNum = num.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+
+  const code = (currencyCode || 'USD').toUpperCase().trim();
+  const currencySymbols = {
+    USD: '$',
+    INR: '₹',
+    EUR: '€',
+    GBP: '£',
+    JPY: '¥'
+  };
+
+  const symbol = currencySymbols[code];
+  if (symbol) {
+    return `${symbol}${formattedNum}`;
+  }
+
+  return `${code} ${formattedNum}`;
+};
+
 const CostOverview = () => {
   // Connection states
   const [connections, setConnections] = useState([]);
@@ -247,7 +271,10 @@ const CostOverview = () => {
             ) : (
               <div>
                 <div style={{ fontSize: '2.5rem', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>
-                  ${mtdCost.data?.totalCost != null ? Number(mtdCost.data.totalCost).toFixed(2) : (mtdCost.data?.amount != null ? Number(mtdCost.data.amount).toFixed(2) : '0.00')}{' '}
+                  {formatCurrency(
+                    mtdCost.data?.totalCost != null ? mtdCost.data.totalCost : mtdCost.data?.amount,
+                    mtdCost.data?.currency
+                  )}{' '}
                   <span style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-secondary)' }}>
                     {mtdCost.data?.currency || 'USD'}
                   </span>
@@ -451,7 +478,10 @@ const CostOverview = () => {
               )}
 
               <div style={{ fontSize: '2rem', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                ${Number(lookupResult.data.totalCost || 0).toFixed(2)} <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{lookupResult.data.currency || 'USD'}</span>
+                {formatCurrency(lookupResult.data.totalCost, lookupResult.data.currency)}{' '}
+                <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                  {lookupResult.data.currency || 'USD'}
+                </span>
               </div>
 
               <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
