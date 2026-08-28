@@ -410,10 +410,45 @@ const CostOverview = () => {
                   </span>
                 </div>
 
-                <span className={`badge ${lookupResult.data.dataFound ? 'badge-success' : 'badge-warning'}`}>
-                  {lookupResult.data.dataFound ? 'Billed Record Found' : 'No Billed Usage Found'}
+                <span className={`badge ${lookupResult.data.isEstimated ? 'badge-info' : (lookupResult.data.dataFound ? 'badge-success' : 'badge-warning')}`}>
+                  {lookupResult.data.isEstimated ? '⚡ Retail Estimate' : (lookupResult.data.dataFound ? 'Billed Record Found' : 'No Billed Usage Found')}
                 </span>
               </div>
+
+              {lookupResult.data.isEstimated ? (
+                <div style={{
+                  backgroundColor: 'rgba(14, 165, 233, 0.12)',
+                  border: '1px solid rgba(14, 165, 233, 0.4)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.8125rem',
+                  color: 'var(--accent-primary)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem'
+                }}>
+                  <strong style={{ fontWeight: '600' }}>⚡ Estimated Retail Cost</strong>
+                  <span>Actual Azure billing data is temporarily unavailable.</span>
+                  <span>This is an estimate based on Azure retail pricing, not actual billed cost.</span>
+                </div>
+              ) : lookupResult.data.isStale && (
+                <div style={{
+                  backgroundColor: 'rgba(234, 179, 8, 0.12)',
+                  border: '1px solid rgba(234, 179, 8, 0.3)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.8125rem',
+                  color: '#eab308',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem'
+                }}>
+                  <strong style={{ fontWeight: '600' }}>⚠️ Showing last known Azure cost</strong>
+                  <span>{lookupResult.data.staleReason || 'Azure Cost Management is temporarily throttling requests.'}</span>
+                </div>
+              )}
 
               <div style={{ fontSize: '2rem', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
                 ${Number(lookupResult.data.totalCost || 0).toFixed(2)} <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{lookupResult.data.currency || 'USD'}</span>

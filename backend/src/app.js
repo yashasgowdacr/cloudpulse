@@ -2016,8 +2016,59 @@ app.get('/api/cost/month-to-date', authenticateToken, async (req, res) => {
 });
 
 /**
+ * Helper to compute an estimated month-to-date cost based on Azure Retail Prices API
+ * when Azure Cost Management API is throttled AND no historical PostgreSQL snapshot exists.
+ */
+async function getResourceRetailEstimate(subscriptionId, resourceGroup, resourceName, customCredential = null) {
+  try {
+    const credential = customCredential || new DefaultAzureCredential();
+    const computeClient = new ComputeManagementClient(credential, subscriptionId);
+    let vm;
+    try {
+      vm = await computeClient.virtualMachines.get(resourceGroup, resourceName);
+    } catch (vmErr) {
+      return null;
+    }
+
+    const vmSize = (vm.hardwareProfile && vm.hardwareProfile.vmSize) ? vm.hardwareProfile.vmSize : null;
+    const region = vm.location || null;
+
+    if (!vmSize || !region) return null;
+
+    const retailRes = await fetchVmRetailPrice(vmSize, region);
+    if (!retailRes || !retailRes.dataFound || retailRes.hourlyPrice === null || retailRes.hourlyPrice === undefined) {
+      return null;
+    }
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const hoursElapsed = Math.max(1, (now.getTime() - startOfMonth.getTime()) / (1000 * 60 * 60));
+    const estimatedCost = Math.round(hoursElapsed * retailRes.hourlyPrice * 100) / 100;
+
+    return {
+      resourceName,
+      resourceGroup,
+      vmSize,
+      region,
+      totalCost: estimatedCost,
+      currency: retailRes.currency || 'USD',
+      timeframe: 'MonthToDate',
+      source: 'Azure Retail Prices',
+      dataFound: true,
+      isStale: true,
+      isEstimated: true,
+      staleReason: 'Azure Cost Management is temporarily throttled. Showing an estimated cost based on Azure retail pricing.',
+      reason: `Actual Azure Cost Management data is temporarily throttled. Showing an estimated month-to-date cost (${Math.round(hoursElapsed)} hours @ $${retailRes.hourlyPrice}/hr) based on Azure retail pricing.`,
+      cachedAt: new Date().toISOString()
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
  * Fetches Resource Month-to-Date cost with multi-tenant caching, in-flight request deduplication,
- * exponential backoff retry on 429, PostgreSQL persistent caching, circuit breaker, and stale cache fallback.
+ * exponential backoff retry on 429, PostgreSQL persistent caching, circuit breaker, retail price estimate fallback, and stale cache fallback.
  */
 async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resourceName, customCredential = null, context = {}) {
   const userId = context.userId || 'system';
@@ -2036,7 +2087,7 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
 
   const dbSnapshot = await getPersistentCostCache({ userId, connectionId, subscriptionId, cacheType: 'RESOURCE', resourceGroup, resourceName });
 
-  // Circuit-Breaker Check: If subscription is currently throttled, return PostgreSQL resource snapshot immediately
+  // Circuit-Breaker Check: If subscription is currently throttled, return PostgreSQL resource snapshot or Retail Price Estimate
   if (isCircuitBreakerOpen(userId, connectionId, subscriptionId)) {
     const fallbackData = cached ? cached.data : dbSnapshot;
     if (fallbackData) {
@@ -2044,10 +2095,18 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
       return {
         ...fallbackData,
         isStale: true,
+        isEstimated: false,
         staleReason: 'Azure Cost Management is temporarily throttling requests. Showing last known Azure cost.',
         cachedAt: fallbackData.cachedAt || (cached ? new Date(cached.timestamp).toISOString() : new Date().toISOString())
       };
     }
+
+    const estimateFallback = await getResourceRetailEstimate(subscriptionId, resourceGroup, resourceName, customCredential);
+    if (estimateFallback) {
+      console.warn(`[AZURE-COST-API] Circuit breaker open & 0 snapshot. Returning Retail Price estimate for key '${cacheKey}'`);
+      return estimateFallback;
+    }
+
     const rateLimitErr = new Error('Azure Cost Management is temporarily throttling requests. Please try again shortly.');
     rateLimitErr.statusCode = 429;
     rateLimitErr.code = 'COST_DATA_TEMPORARILY_UNAVAILABLE';
@@ -2131,6 +2190,7 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
           source: 'Azure Cost Management',
           dataFound,
           isStale: false,
+          isEstimated: false,
           reason: dataFound
             ? `Matching cost record found for resource '${resourceName}'.`
             : `No matching billing record found for resource '${resourceName}' in resource group '${resourceGroup}' for the current month-to-date period.`
@@ -2171,12 +2231,19 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
         return {
           ...fallbackData,
           isStale: true,
+          isEstimated: false,
           staleReason: 'Azure Cost Management is temporarily throttling requests. Showing last known Azure cost.',
           cachedAt: fallbackData.cachedAt || (cached ? new Date(cached.timestamp).toISOString() : new Date().toISOString())
         };
       }
 
       if (is429) {
+        const estimateFallback = await getResourceRetailEstimate(subscriptionId, resourceGroup, resourceName, customCredential);
+        if (estimateFallback) {
+          console.warn(`[AZURE-COST-API] Throttled 429 & 0 snapshot. Returning Retail Price estimate for key '${cacheKey}'`);
+          return estimateFallback;
+        }
+
         const rateLimitErr = new Error('Azure Cost Management is temporarily throttling requests. Please try again shortly.');
         rateLimitErr.statusCode = 429;
         rateLimitErr.code = 'COST_DATA_TEMPORARILY_UNAVAILABLE';
