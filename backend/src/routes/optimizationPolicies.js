@@ -8,8 +8,7 @@ const router = express.Router();
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const policy = await getPolicyForUser(req.user.id);
-    const dryRun = process.env.DRY_RUN !== 'false';
-    return res.json({ policy: { ...policy, dryRun } });
+    return res.json({ policy: { ...policy } });
   } catch (error) {
     const status = error.statusCode || 500;
     return res.status(status).json({
@@ -23,10 +22,9 @@ router.get('/', authenticateToken, async (req, res) => {
 router.put('/', authenticateToken, async (req, res) => {
   try {
     const policy = await updatePolicyForUser(req.user.id, req.body);
-    const dryRun = process.env.DRY_RUN !== 'false';
     return res.json({
       message: 'Optimization policy updated successfully',
-      policy: { ...policy, dryRun }
+      policy: { ...policy }
     });
   } catch (error) {
     const status = error.statusCode || 400;

@@ -28,7 +28,7 @@ All Phase 5 customer-facing frontend modules (5A.1 through 5B.7) have been imple
 
 ### 5. Phase 5B.3 — Virtual Machine Monitoring UI
 - **Location**: `src/pages/VirtualMachines.jsx`, `src/services/vmService.js`
-- **Key Features**: VM discovery table, power state badges (`running`, `stopped`, `deallocated`), VM details modal with independent parallel queries (`/metrics`, `/vm-price`, `/savings`, `/shutdown/dry-run`). Disabled real shutdown button (`"Shutdown unavailable while Dry Run is enabled"`).
+- **Key Features**: VM discovery table, power state badges (`running`, `stopped`, `deallocated`), VM details modal with independent parallel queries (`/metrics`, `/vm-price`, `/savings`). Direct live VM power controls (`Start VM`, `Deallocate VM`).
 
 ### 6. Phase 5B.4 — Cost Overview UI
 - **Location**: `src/pages/CostOverview.jsx`, `src/services/costService.js`
@@ -50,7 +50,6 @@ All Phase 5 customer-facing frontend modules (5A.1 through 5B.7) have been imple
 ### 8. Phase 5B.6 — Optimization Policy UI
 - **Location**: `src/pages/OptimizationPolicy.jsx`, `src/services/optimizationPolicyService.js`
 - **Key Features**:
-  - Persistent Safe Mode Active (`DRY_RUN` Enabled) Banner.
   - Idle CPU Threshold input control (`0` - `100%`).
   - Monitoring Window input control (`5` - `1440` minutes).
   - Auto-Shutdown toggle switch (`ON` / `OFF`) defaulting to `false`.
@@ -60,16 +59,15 @@ All Phase 5 customer-facing frontend modules (5A.1 through 5B.7) have been imple
 ### 9. Phase 5B.7 — Customer Action History UI
 - **Location**: `src/pages/ActionHistory.jsx`, `src/services/actionHistoryService.js`
 - **Key Features**:
-  - Simulation Mode (`DRY_RUN` Active) Banner.
   - Search filter by VM name (`GET /api/actions/:vmName`).
-  - Status filter dropdown (`DRY_RUN`, `SKIPPED`, `BLOCKED`, `SUCCESS`, `FAILED`).
+  - Status filter dropdown (`SKIPPED`, `BLOCKED`, `SUCCESS`, `FAILED`).
   - Tenant audit table with localized timestamps, status badges, CPU averages, and expandable reason logs.
   - Client-side pagination (10 per page) preventing large DOM trees.
 
 ---
 
 ## Production Build & Safety Summary
-- **Frontend Production Build**: `vite build` completed in **424ms** with **0 warnings / 0 errors**.
+- **Frontend Production Build**: `vite build` completed in **435ms** with **0 warnings / 0 errors**.
 - **Tenant Isolation**: Sourced strictly from `req.user.id`. Zero cross-tenant data leaks.
 - **Security Audit**: `accessToken` held strictly in React closure memory (`0` `localStorage` / `sessionStorage` tokens). Zero Azure secrets exposed in frontend code.
-- **Safety Enforcement**: `DRY_RUN=true` remains active. **Zero real Azure VMs modified.**
+- **Safety Enforcement**: Production guards, idle CPU evaluation, monitoring window thresholds, and auto-shutdown policy remain strictly enforced by backend policy engine.

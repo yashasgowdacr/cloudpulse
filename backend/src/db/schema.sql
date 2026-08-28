@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS action_history (
     vm_name VARCHAR(255) NOT NULL,
     action VARCHAR(50) NOT NULL DEFAULT 'DEALLOCATE',
     status VARCHAR(50) NOT NULL,
-    dry_run BOOLEAN NOT NULL DEFAULT true,
+    dry_run BOOLEAN NOT NULL DEFAULT false,
     cpu_average NUMERIC(5,2),
     reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

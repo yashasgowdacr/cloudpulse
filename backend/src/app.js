@@ -366,31 +366,7 @@ function evaluateShutdownPolicy(vmName, idleResult, environment = 'development',
   };
 }
 
-function evaluateDryRunShutdown(vmName, policyResult) {
-  const isDryRun = process.env.DRY_RUN !== 'false';
-  const wouldExecute = policyResult.allowed;
-  const reason = isDryRun
-    ? (wouldExecute
-        ? `[DRY-RUN] Virtual machine '${vmName}' meets all policy requirements and WOULD be deallocated.`
-        : `[DRY-RUN] Virtual machine '${vmName}' deallocation WOULD NOT execute. Reason: ${policyResult.reason}`)
-    : (wouldExecute
-        ? `[LIVE] Virtual machine '${vmName}' meets all policy requirements and WILL be deallocated live.`
-        : `[LIVE] Virtual machine '${vmName}' deallocation WILL NOT execute. Reason: ${policyResult.reason}`);
 
-  return {
-    vmName,
-    action: 'DEALLOCATE',
-    dryRun: isDryRun,
-    wouldExecute,
-    idle: policyResult.idle,
-    cpuAverage: policyResult.cpuAverage,
-    environment: policyResult.environment,
-    autoShutdown: policyResult.autoShutdown,
-    allowed: policyResult.allowed,
-    reason,
-    policy: policyResult
-  };
-}
 
 function parseQueryOptions(query) {
   let windowMinutes = 30;
@@ -575,11 +551,6 @@ async function sendNotification({ recipientEmail, vmName, action, status, cpuAve
 }
 
 async function sendDeallocationNotification(actionRecord) {
-  // Do not send notification for dry-run preview simulation mode
-  if (actionRecord.dryRun) {
-    return;
-  }
-
   // Only dispatch email for SUCCESS or FAILED action outcomes
   const isSuccess = actionRecord.status === 'SUCCESS';
   const isFailure = actionRecord.status === 'FAILED';
@@ -625,19 +596,18 @@ async function recordAction(entry) {
   const connectionId = entry.connectionId || entry.connection_id || null;
   const vmName = entry.vmName;
   const action = entry.action || 'DEALLOCATE';
-  const status = entry.status || (entry.executed ? 'SUCCESS' : (entry.dryRun ? 'DRY_RUN' : 'BLOCKED'));
-  const dryRun = Boolean(entry.dryRun);
+  const status = entry.status || (entry.executed ? 'SUCCESS' : 'BLOCKED');
   const cpuAverage = entry.cpuAverage !== undefined ? entry.cpuAverage : (entry.policy ? entry.policy.cpuAverage : null);
   const reason = entry.reason || '';
   const recipientEmail = entry.recipientEmail || entry.userEmail || null;
 
   try {
     const query = `
-      INSERT INTO action_history (user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason, created_at
+      INSERT INTO action_history (user_id, connection_id, vm_name, action, status, cpu_average, reason)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, user_id, connection_id, vm_name, action, status, cpu_average, reason, created_at
     `;
-    const values = [userId, connectionId, vmName, action, status, dryRun, cpuAverage, reason];
+    const values = [userId, connectionId, vmName, action, status, cpuAverage, reason];
     const result = await db.query(query, values);
     const row = result.rows[0];
 
@@ -649,7 +619,6 @@ async function recordAction(entry) {
       vmName: row.vm_name,
       action: row.action,
       status: row.status,
-      dryRun: Boolean(row.dry_run),
       cpuAverage: row.cpu_average !== null ? parseFloat(row.cpu_average) : null,
       reason: row.reason,
       timestamp: row.created_at
@@ -669,7 +638,6 @@ async function recordAction(entry) {
       vmName,
       action,
       status,
-      dryRun,
       cpuAverage,
       reason
     };
@@ -686,7 +654,7 @@ async function getActions(userId, vmNameFilter = null) {
 
   if (vmNameFilter) {
     query = `
-      SELECT id, user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason, created_at
+      SELECT id, user_id, connection_id, vm_name, action, status, cpu_average, reason, created_at
       FROM action_history
       WHERE user_id = $1 AND LOWER(vm_name) = LOWER($2)
       ORDER BY created_at DESC
@@ -694,7 +662,7 @@ async function getActions(userId, vmNameFilter = null) {
     values = [userId, vmNameFilter];
   } else {
     query = `
-      SELECT id, user_id, connection_id, vm_name, action, status, dry_run, cpu_average, reason, created_at
+      SELECT id, user_id, connection_id, vm_name, action, status, cpu_average, reason, created_at
       FROM action_history
       WHERE user_id = $1
       ORDER BY created_at DESC
@@ -710,7 +678,6 @@ async function getActions(userId, vmNameFilter = null) {
     vmName: row.vm_name,
     action: row.action,
     status: row.status,
-    dryRun: Boolean(row.dry_run),
     cpuAverage: row.cpu_average !== null ? parseFloat(row.cpu_average) : null,
     reason: row.reason,
     timestamp: row.created_at
@@ -720,7 +687,6 @@ async function getActions(userId, vmNameFilter = null) {
 async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options = {}, customCredential = null, context = {}) {
   const userId = context.userId || options.userId || null;
   const connectionId = context.connectionId || options.connectionId || null;
-  const isDryRun = process.env.DRY_RUN !== 'false';
 
   const windowMinutes = options.windowMinutes || 30;
   const timespan = options.timespan || `PT${windowMinutes}M`;
@@ -760,8 +726,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
       const result = {
         vmName,
         action: 'DEALLOCATE',
-        dryRun: isDryRun,
-        wouldExecute: false,
         executed: false,
         allowed: false,
         error: 'VM_NOT_FOUND',
@@ -775,7 +739,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
         vmName,
         action: 'DEALLOCATE',
         status: 'FAILED',
-        dryRun: isDryRun,
         cpuAverage: null,
         reason: result.reason
       });
@@ -786,8 +749,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
       const result = {
         vmName,
         action: 'DEALLOCATE',
-        dryRun: isDryRun,
-        wouldExecute: false,
         executed: false,
         allowed: false,
         error: 'INSUFFICIENT_PERMISSIONS',
@@ -801,7 +762,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
         vmName,
         action: 'DEALLOCATE',
         status: 'FAILED',
-        dryRun: isDryRun,
         cpuAverage: null,
         reason: result.reason
       });
@@ -812,8 +772,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
     const result = {
       vmName,
       action: 'DEALLOCATE',
-      dryRun: isDryRun,
-      wouldExecute: false,
       executed: false,
       allowed: false,
       error: 'AZURE_API_FAILURE',
@@ -821,16 +779,15 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
       details: err.message
     };
 
-      await recordAction({
-        userId,
-        connectionId,
-        vmName,
-        action: 'DEALLOCATE',
-        status: 'FAILED',
-        dryRun: isDryRun,
-        cpuAverage: null,
-        reason: result.reason
-      });
+    await recordAction({
+      userId,
+      connectionId,
+      vmName,
+      action: 'DEALLOCATE',
+      status: 'FAILED',
+      cpuAverage: null,
+      reason: result.reason
+    });
 
     return result;
   }
@@ -841,8 +798,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
     const result = {
       vmName,
       action: 'DEALLOCATE',
-      dryRun: isDryRun,
-      wouldExecute: false,
       executed: false,
       allowed: false,
       status: 'SKIPPED',
@@ -855,7 +810,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
       vmName,
       action: 'DEALLOCATE',
       status: 'SKIPPED',
-      dryRun: isDryRun,
       cpuAverage: null,
       reason: skipReason
     });
@@ -898,8 +852,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
     const result = {
       vmName,
       action: 'DEALLOCATE',
-      dryRun: isDryRun,
-      wouldExecute: false,
       executed: false,
       allowed: false,
       reason: policyResult.reason,
@@ -912,36 +864,8 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
       vmName,
       action: 'DEALLOCATE',
       status: 'BLOCKED',
-      dryRun: isDryRun,
       cpuAverage: policyResult.cpuAverage,
       reason: policyResult.reason
-    });
-
-    return result;
-  }
-
-  if (isDryRun) {
-    const reason = `[DRY-RUN] Virtual machine '${vmName}' meets all policy requirements and WOULD be deallocated. No Azure action was performed because DRY_RUN is enabled.`;
-    const result = {
-      vmName,
-      action: 'DEALLOCATE',
-      dryRun: true,
-      wouldExecute: true,
-      executed: false,
-      allowed: true,
-      reason,
-      policy: policyResult
-    };
-
-    await recordAction({
-      userId,
-      connectionId,
-      vmName,
-      action: 'DEALLOCATE',
-      status: 'DRY_RUN',
-      dryRun: true,
-      cpuAverage: policyResult.cpuAverage,
-      reason
     });
 
     return result;
@@ -953,8 +877,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
     const result = {
       vmName,
       action: 'DEALLOCATE',
-      dryRun: false,
-      wouldExecute: true,
       executed: true,
       allowed: true,
       status: 'deallocated',
@@ -968,7 +890,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
       vmName,
       action: 'DEALLOCATE',
       status: 'SUCCESS',
-      dryRun: false,
       cpuAverage: policyResult.cpuAverage,
       reason: result.reason
     });
@@ -986,8 +907,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
     const result = {
       vmName,
       action: 'DEALLOCATE',
-      dryRun: false,
-      wouldExecute: true,
       executed: false,
       allowed: true,
       error: errorCode,
@@ -1002,7 +921,6 @@ async function executeVmShutdown(subscriptionId, resourceGroup, vmName, options 
       vmName,
       action: 'DEALLOCATE',
       status: 'FAILED',
-      dryRun: false,
       cpuAverage: policyResult.cpuAverage,
       reason: userReason
     });
@@ -1168,76 +1086,7 @@ app.get('/azure/vms/:resourceGroup/:vmName/policy', authenticateToken, async (re
   }
 });
 
-app.get('/azure/vms/:resourceGroup/:vmName/shutdown/dry-run', authenticateToken, async (req, res) => {
-  const { connectionId } = req.query;
-  const { resourceGroup, vmName } = req.params;
-  const { windowMinutes, threshold, environment, autoShutdown } = parseQueryOptions(req.query);
 
-  try {
-    const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
-
-    if (!resolved.subscriptionId) {
-      return res.status(500).json({
-        error: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
-      });
-    }
-
-    let detectedEnv = environment || 'development';
-    let isAutoShutdownEnabled = autoShutdown !== undefined ? autoShutdown : true;
-
-    if (vmName.toLowerCase().includes('prod') || vmName.toLowerCase().includes('production')) {
-      detectedEnv = 'production';
-    }
-
-    const computeClient = new ComputeManagementClient(resolved.credential, resolved.subscriptionId);
-    try {
-      const vmResource = await computeClient.virtualMachines.get(resourceGroup, vmName);
-      if (vmResource && vmResource.tags) {
-        const envTag = vmResource.tags.Environment || vmResource.tags.environment || vmResource.tags.ENV || vmResource.tags.env;
-        if (envTag && envTag.toLowerCase() === 'production') {
-          detectedEnv = 'production';
-        }
-        const autoShutdownTag = vmResource.tags.AutoShutdown || vmResource.tags.autoshutdown;
-        if (autoShutdownTag && (autoShutdownTag.toLowerCase() === 'disabled' || autoShutdownTag.toLowerCase() === 'false')) {
-          isAutoShutdownEnabled = false;
-        }
-      }
-    } catch (tagErr) {}
-
-    const timespan = `PT${windowMinutes}M`;
-    const metricsData = await fetchVmCpuMetrics(resolved.subscriptionId, resourceGroup, vmName, timespan, resolved.credential);
-    const idleStatus = evaluateVmIdleStatus(vmName, metricsData, threshold, windowMinutes);
-    const policyResult = evaluateShutdownPolicy(vmName, idleStatus, detectedEnv, isAutoShutdownEnabled);
-    const dryRunResult = evaluateDryRunShutdown(vmName, policyResult);
-
-    const isDryRun = process.env.DRY_RUN !== 'false';
-
-    recordAction({
-      userId: req.user.id,
-      connectionId: resolved.connectionId,
-      vmName,
-      action: 'DEALLOCATE',
-      status: isDryRun ? 'DRY_RUN' : (policyResult.allowed ? 'LIVE_PREVIEW' : 'BLOCKED'),
-      dryRun: isDryRun,
-      cpuAverage: policyResult.cpuAverage,
-      reason: dryRunResult.reason
-    });
-
-    return res.json(dryRunResult);
-  } catch (error) {
-    if (error.message && error.message.includes('Multiple active Azure connections found')) {
-      return res.status(400).json({
-        error: 'MULTIPLE_CONNECTIONS_REQUIRED',
-        message: error.message
-      });
-    }
-
-    return res.status(500).json({
-      error: `Failed to execute shutdown dry-run for VM '${vmName}' in resource group '${resourceGroup}'`,
-      details: error.message
-    });
-  }
-});
 
 app.post('/azure/vms/:resourceGroup/:vmName/shutdown', authenticateToken, async (req, res) => {
   const { connectionId } = req.query;
@@ -1312,7 +1161,6 @@ app.post('/azure/vms/:resourceGroup/:vmName/start', authenticateToken, async (re
       vmName,
       action: 'START',
       status: 'SUCCESS',
-      dryRun: false,
       cpuAverage: null,
       reason: `Virtual machine '${vmName}' was successfully powered ON (started) on Azure.`
     });
@@ -1335,7 +1183,6 @@ app.post('/azure/vms/:resourceGroup/:vmName/start', authenticateToken, async (re
         vmName,
         action: 'START',
         status: 'FAILED',
-        dryRun: false,
         cpuAverage: null,
         reason: `Failed to power ON virtual machine '${vmName}': ${sanitizedMsg}`
       });
@@ -1425,7 +1272,6 @@ app.post('/api/optimization/run-now', authenticateToken, async (req, res) => {
             vmName: vm.name,
             action: 'DEALLOCATE',
             status: 'SKIPPED',
-            dryRun: process.env.DRY_RUN !== 'false',
             cpuAverage: null,
             reason: skipReason
           });
@@ -1476,7 +1322,6 @@ async function runScheduledOptimization() {
     return;
   }
 
-  const isDryRun = process.env.DRY_RUN !== 'false';
   console.log('[SCHEDULER] Starting multi-user optimization scan (advisory lock acquired)...');
 
   try {
@@ -1536,7 +1381,6 @@ async function runScheduledOptimization() {
                     vmName: vm.name,
                     action: 'DEALLOCATE',
                     status: 'SKIPPED',
-                    dryRun: isDryRun,
                     cpuAverage: null,
                     reason: skipReason
                   });

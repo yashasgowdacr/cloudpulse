@@ -142,44 +142,7 @@ const OptimizationPolicy = () => {
         </button>
       </div>
 
-      {/* System Execution Mode Banner (DRY_RUN vs LIVE) */}
-      {savedPolicy?.dryRun === false ? (
-        <div style={{
-          backgroundColor: 'rgba(16, 185, 129, 0.08)',
-          border: '1px solid rgba(16, 185, 129, 0.4)',
-          borderRadius: 'var(--radius-md)',
-          padding: '1rem 1.25rem',
-          marginBottom: '1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.875rem'
-        }}>
-          <div style={{ color: 'var(--status-success)', flexShrink: 0 }}>
-            <CheckCircle2 size={26} />
-          </div>
-          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-            <strong style={{ color: 'var(--status-success)' }}>Live Execution Mode Active (DRY_RUN=false):</strong> CloudPulse is running in production live mode with <code style={{ backgroundColor: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px', color: 'var(--status-success)' }}>DRY_RUN=false</code>. Idle VMs meeting policy criteria will be automatically deallocated live on Azure.
-          </div>
-        </div>
-      ) : (
-        <div style={{
-          backgroundColor: 'var(--bg-secondary)',
-          border: '1px solid rgba(14, 165, 233, 0.4)',
-          borderRadius: 'var(--radius-md)',
-          padding: '1rem 1.25rem',
-          marginBottom: '1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.875rem'
-        }}>
-          <div style={{ color: 'var(--accent-primary)', flexShrink: 0 }}>
-            <ShieldCheck size={26} />
-          </div>
-          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-            <strong style={{ color: 'var(--accent-primary)' }}>Safe Mode Active (DRY_RUN Enabled):</strong> CloudPulse is currently running with <code style={{ backgroundColor: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px', color: 'var(--accent-secondary)' }}>DRY_RUN=true</code>. All policy evaluations and deallocations are simulated for security, and zero real Azure VMs will be modified.
-          </div>
-        </div>
-      )}
+
 
       {/* Success Notification Alert */}
       {successMsg && (
@@ -386,14 +349,7 @@ const OptimizationPolicy = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'rgba(14, 165, 233, 0.15)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', flexShrink: 0 }}>
-                4
-              </div>
-              <div>
-                <strong style={{ color: 'var(--text-primary)' }}>Dry-Run Guard:</strong> In development mode (<code style={{ color: 'var(--accent-secondary)' }}>DRY_RUN=true</code>), deallocations are logged to audit history without touching Azure resources.
-              </div>
-            </div>
+
           </div>
         </div>
       </div>
@@ -438,7 +394,7 @@ const OptimizationPolicy = () => {
                 <li>CloudPulse will evaluate VMs against your threshold ({idleCpuThreshold}% CPU over {monitoringWindowMinutes}m).</li>
                 <li>Eligible idle VMs will be evaluated by the backend policy engine.</li>
                 <li>Safety guards and production protection remain enforced by backend rules.</li>
-                <li><strong style={{ color: 'var(--accent-primary)' }}>DRY_RUN mode currently prevents real Azure deallocations.</strong></li>
+
               </ul>
             </div>
 

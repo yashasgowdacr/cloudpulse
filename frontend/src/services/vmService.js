@@ -43,14 +43,7 @@ export const vmService = {
     return response.data;
   },
 
-  async getVmShutdownDryRun(resourceGroup, vmName, connectionId) {
-    const params = connectionId ? { connectionId } : {};
-    const response = await api.get(
-      `/azure/vms/${encodeURIComponent(resourceGroup)}/${encodeURIComponent(vmName)}/shutdown/dry-run`,
-      { params }
-    );
-    return response.data;
-  },
+
 
   async shutdownVm(resourceGroup, vmName, connectionId) {
     const params = connectionId ? { connectionId } : {};

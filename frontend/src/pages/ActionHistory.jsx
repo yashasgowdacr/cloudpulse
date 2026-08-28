@@ -83,7 +83,6 @@ const ActionHistory = () => {
   const filteredActions = actions.filter((act) => {
     if (statusFilter === 'ALL') return true;
     const st = (act.status || '').toUpperCase();
-    if (statusFilter === 'DRY_RUN') return act.dryRun || st === 'DRY_RUN';
     return st === statusFilter;
   });
 
@@ -94,8 +93,8 @@ const ActionHistory = () => {
   // Status Badge Renderer
   const renderStatusBadge = (act) => {
     const st = (act.status || '').toUpperCase();
-    if (act.dryRun || st === 'DRY_RUN') {
-      return <span className="badge badge-info" title="Simulation — no VM was modified.">SIMULATION (DRY_RUN)</span>;
+    if (st === 'DRY_RUN') {
+      return <span className="badge badge-info" title="Historical record.">HISTORICAL</span>;
     }
     if (st === 'SKIPPED') {
       return <span className="badge badge-warning" title="VM was already stopped/deallocated.">SKIPPED</span>;
@@ -131,24 +130,7 @@ const ActionHistory = () => {
         </button>
       </div>
 
-      {/* Simulation / Dry Run Banner */}
-      <div style={{
-        backgroundColor: 'var(--bg-secondary)',
-        border: '1px solid rgba(14, 165, 233, 0.4)',
-        borderRadius: 'var(--radius-md)',
-        padding: '1rem 1.25rem',
-        marginBottom: '1.5rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.875rem'
-      }}>
-        <div style={{ color: 'var(--accent-primary)', flexShrink: 0 }}>
-          <ShieldCheck size={26} />
-        </div>
-        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-          <strong style={{ color: 'var(--accent-primary)' }}>Simulation Mode (DRY_RUN Active):</strong> Actions marked as <code style={{ backgroundColor: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px', color: 'var(--accent-secondary)' }}>SIMULATION (DRY_RUN)</code> represent dry-run policy evaluations. Zero real Azure VMs were modified during simulation mode.
-        </div>
-      </div>
+
 
       {/* Error Banner */}
       {error && (
@@ -191,7 +173,7 @@ const ActionHistory = () => {
               style={{ backgroundColor: 'var(--bg-primary)', width: 'auto', minWidth: '160px' }}
             >
               <option value="ALL">All Statuses</option>
-              <option value="DRY_RUN">Simulation (DRY_RUN)</option>
+
               <option value="SKIPPED">Skipped</option>
               <option value="BLOCKED">Blocked</option>
               <option value="SUCCESS">Success</option>
@@ -225,7 +207,7 @@ const ActionHistory = () => {
               No optimization actions yet
             </h3>
             <p style={{ color: 'var(--text-secondary)', maxWidth: '460px', margin: '0 auto 1.5rem', fontSize: '0.875rem' }}>
-              CloudPulse will record optimization evaluations, dry-runs, and scheduled deallocations here.
+              CloudPulse will record optimization evaluations, manual actions, and scheduled deallocations here.
             </p>
             <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
               <Link to="/vms" className="btn btn-secondary">

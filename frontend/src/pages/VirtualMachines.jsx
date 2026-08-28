@@ -53,7 +53,6 @@ const VirtualMachines = () => {
   const [metrics, setMetrics] = useState({ loading: false, data: null, error: null });
   const [price, setPrice] = useState({ loading: false, data: null, error: null });
   const [savings, setSavings] = useState({ loading: false, data: null, error: null });
-  const [dryRun, setDryRun] = useState({ loading: false, data: null, error: null });
   const [deallocating, setDeallocating] = useState(false);
   const [deallocateMsg, setDeallocateMsg] = useState(null);
 
@@ -132,7 +131,6 @@ const VirtualMachines = () => {
     setMetrics({ loading: true, data: null, error: null });
     setPrice({ loading: true, data: null, error: null });
     setSavings({ loading: true, data: null, error: null });
-    setDryRun({ loading: true, data: null, error: null });
 
     // A. CPU Metrics
     vmService.getVmMetrics(rg, name, selectedConnectionId)
@@ -148,11 +146,6 @@ const VirtualMachines = () => {
     vmService.getVmSavings(rg, name, selectedConnectionId)
       .then((data) => setSavings({ loading: false, data, error: null }))
       .catch((err) => setSavings({ loading: false, data: null, error: 'Savings calculation unavailable' }));
-
-    // D. Shutdown Preview / Dry Run
-    vmService.getVmShutdownDryRun(rg, name, selectedConnectionId)
-      .then((data) => setDryRun({ loading: false, data, error: null }))
-      .catch((err) => setDryRun({ loading: false, data: null, error: 'Shutdown preview unavailable' }));
   };
 
   const handleExecuteShutdown = async (vm) => {
@@ -594,39 +587,16 @@ const VirtualMachines = () => {
                 </button>
               </div>
             ) : (
-              <div className="card" style={{
-                padding: '1.25rem',
-                border: dryRun.data?.dryRun === false ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(245, 158, 11, 0.4)',
-                backgroundColor: dryRun.data?.dryRun === false ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)'
-              }}>
+              <div className="card" style={{ padding: '1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <ShieldCheck size={18} style={{ color: dryRun.data?.dryRun === false ? 'var(--status-success)' : 'var(--status-warning)' }} />
+                    <Power size={18} style={{ color: 'var(--status-error)' }} />
                     <span style={{ fontSize: '0.875rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                      {dryRun.data?.dryRun === false ? 'Live Deallocation Mode (DRY_RUN=false)' : 'Shutdown Preview (DRY_RUN Enabled)'}
+                      VM Deallocation & Power Management
                     </span>
                   </div>
-                  <span className={`badge ${dryRun.data?.dryRun === false ? 'badge-success' : 'badge-warning'}`}>
-                    {dryRun.data?.dryRun === false ? 'LIVE MODE' : 'Preview Only'}
-                  </span>
+                  <span className="badge badge-info">Live Action</span>
                 </div>
-
-                {dryRun.loading ? (
-                  <div className="loading-center" style={{ minHeight: '50px' }}><div className="spinner" style={{ width: '1.25rem', height: '1.25rem' }}></div></div>
-                ) : dryRun.error ? (
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                    {safeText(dryRun.error, 'Shutdown preview unavailable')}
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                      CPU Avg: <strong>{(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage) != null ? `${Number(dryRun.data?.cpuAverage ?? dryRun.data?.policy?.cpuAverage).toFixed(2)}%` : 'N/A'}</strong> | Threshold: <strong>{dryRun.data?.idleCpuThreshold ?? 5}%</strong>
-                    </div>
-                    <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                      Would Deallocate: <strong style={{ color: (dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'var(--status-success)' : 'var(--status-warning)' }}>{(dryRun.data?.wouldExecute ?? dryRun.data?.willDeallocate) ? 'YES' : 'NO'}</strong> ({safeText(dryRun.data?.reason, 'Evaluated')})
-                    </div>
-                  </div>
-                )}
 
                 {deallocateMsg && (
                   <div style={{
@@ -641,25 +611,15 @@ const VirtualMachines = () => {
                   </div>
                 )}
 
-                {dryRun.data?.dryRun === false ? (
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => handleExecuteShutdown(selectedVm)}
-                    disabled={deallocating}
-                    style={{ width: '100%', gap: '0.5rem', fontSize: '0.8125rem' }}
-                  >
-                    <Power size={16} className={deallocating ? 'spinner' : ''} style={deallocating ? { animation: 'spin 1s linear infinite' } : {}} />
-                    <span>{deallocating ? 'Deallocating Live on Azure...' : 'Deallocate VM Live Now'}</span>
-                  </button>
-                ) : (
-                  <button
-                    className="btn btn-secondary"
-                    disabled
-                    style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', fontSize: '0.8125rem' }}
-                  >
-                    Shutdown unavailable while Dry Run is enabled
-                  </button>
-                )}
+                <button
+                  className="btn btn-primary"
+                  onClick={() => handleExecuteShutdown(selectedVm)}
+                  disabled={deallocating}
+                  style={{ width: '100%', gap: '0.5rem', fontSize: '0.8125rem', backgroundColor: 'var(--status-error)', borderColor: 'var(--status-error)' }}
+                >
+                  <Power size={16} className={deallocating ? 'spinner' : ''} style={deallocating ? { animation: 'spin 1s linear infinite' } : {}} />
+                  <span>{deallocating ? 'Deallocating Live on Azure...' : 'Deallocate VM Live Now'}</span>
+                </button>
               </div>
             )}
           </div>
