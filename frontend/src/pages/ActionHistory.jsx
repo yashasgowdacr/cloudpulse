@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { actionHistoryService } from '../services/actionHistoryService';
+import { exportService } from '../services/exportService';
 import { Link } from 'react-router-dom';
 import {
   History,
@@ -14,7 +15,8 @@ import {
   ChevronUp,
   Filter,
   Info,
-  Play
+  Play,
+  Download
 } from 'lucide-react';
 
 const ActionHistory = () => {
@@ -22,6 +24,18 @@ const ActionHistory = () => {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState('');
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async (format) => {
+    setExporting(true);
+    try {
+      await exportService.exportActions(format);
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Filtering states
   const [searchVm, setSearchVm] = useState('');
@@ -124,10 +138,34 @@ const ActionHistory = () => {
           </p>
         </div>
 
-        <button className="btn btn-secondary" onClick={fetchHistory} disabled={loading}>
-          <RefreshCw size={16} className={loading ? 'spinner' : ''} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
-          <span>Refresh History</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleExport('csv')}
+            disabled={exporting || actions.length === 0}
+            title="Export Action History as CSV"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+          >
+            <Download size={15} />
+            <span>CSV</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleExport('xlsx')}
+            disabled={exporting || actions.length === 0}
+            title="Export Action History as Excel (.xlsx)"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+          >
+            <Download size={15} />
+            <span>Excel</span>
+          </button>
+
+          <button className="btn btn-secondary" onClick={fetchHistory} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+            <RefreshCw size={15} className={loading ? 'spinner' : ''} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
 

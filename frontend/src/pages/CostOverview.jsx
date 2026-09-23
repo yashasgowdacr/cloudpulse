@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { azureConnectionService } from '../services/azureConnectionService';
 import { costService } from '../services/costService';
 import { vmService } from '../services/vmService';
+import { exportService } from '../services/exportService';
+import { budgetService } from '../services/budgetService';
+import { anomalyService } from '../services/anomalyService';
 import { Link } from 'react-router-dom';
 import {
   DollarSign,
@@ -12,9 +15,17 @@ import {
   Info,
   TrendingDown,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Server,
-  Layers
+  Layers,
+  Download,
+  Target,
+  Bell,
+  Trash2,
+  Plus,
+  Check,
+  X
 } from 'lucide-react';
 
 const formatCurrency = (amount, currencyCode = 'USD') => {
@@ -58,6 +69,98 @@ const CostOverview = () => {
   const [customName, setCustomName] = useState('');
 
   const [lookupResult, setLookupResult] = useState({ loading: false, data: null, error: null });
+  const [exporting, setExporting] = useState(false);
+
+  // Budget states (Phase 8)
+  const [budgets, setBudgets] = useState({ loading: true, data: [] });
+  const [showCreateBudgetModal, setShowCreateBudgetModal] = useState(false);
+  const [newBudget, setNewBudget] = useState({
+    name: '',
+    subscriptionId: '',
+    resourceGroup: '',
+    monthlyAmount: '',
+    warningThresholdPct: 80,
+    criticalThresholdPct: 100,
+    currency: 'USD'
+  });
+  const [creatingBudget, setCreatingBudget] = useState(false);
+  const [budgetError, setBudgetError] = useState('');
+
+  // Cost Anomalies state (Phase 8)
+  const [anomalies, setAnomalies] = useState({ loading: true, data: [] });
+  const [acknowledgingId, setAcknowledgingId] = useState(null);
+
+  const fetchBudgets = useCallback(async () => {
+    setBudgets(prev => ({ ...prev, loading: true }));
+    try {
+      const res = await budgetService.getBudgets();
+      setBudgets({ loading: false, data: res.budgets || [] });
+    } catch (err) {
+      setBudgets({ loading: false, data: [] });
+    }
+  }, []);
+
+  const handleCreateBudget = async (e) => {
+    e.preventDefault();
+    setCreatingBudget(true);
+    setBudgetError('');
+    try {
+      const activeConn = connections.find(c => c.id === selectedConnectionId) || connections[0];
+      await budgetService.createBudget({
+        ...newBudget,
+        subscriptionId: newBudget.subscriptionId || activeConn?.subscription_id || 'default-sub'
+      });
+      setShowCreateBudgetModal(false);
+      setNewBudget({ name: '', subscriptionId: '', resourceGroup: '', monthlyAmount: '', warningThresholdPct: 80, criticalThresholdPct: 100, currency: 'USD' });
+      await fetchBudgets();
+    } catch (err) {
+      setBudgetError(err.response?.data?.message || err.message || 'Failed to create budget');
+    } finally {
+      setCreatingBudget(false);
+    }
+  };
+
+  const handleDeleteBudget = async (id) => {
+    try {
+      await budgetService.deleteBudget(id);
+      await fetchBudgets();
+    } catch (err) {
+      console.error('Delete budget failed:', err);
+    }
+  };
+
+  const fetchAnomalies = useCallback(async () => {
+    setAnomalies(prev => ({ ...prev, loading: true }));
+    try {
+      const res = await anomalyService.getAnomalies();
+      setAnomalies({ loading: false, data: res.anomalies || [] });
+    } catch (err) {
+      setAnomalies({ loading: false, data: [] });
+    }
+  }, []);
+
+  const handleAcknowledgeAnomaly = async (id) => {
+    setAcknowledgingId(id);
+    try {
+      await anomalyService.acknowledgeAnomaly(id);
+      await fetchAnomalies();
+    } catch (err) {
+      console.error('Acknowledge failed:', err);
+    } finally {
+      setAcknowledgingId(null);
+    }
+  };
+
+  const handleExport = async (format) => {
+    setExporting(true);
+    try {
+      await exportService.exportCosts(selectedConnectionId, format);
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // 1. Fetch Azure Connections
   const fetchConnections = useCallback(async () => {
@@ -122,7 +225,9 @@ const CostOverview = () => {
 
   useEffect(() => {
     fetchConnections();
-  }, []);
+    fetchBudgets();
+    fetchAnomalies();
+  }, [fetchConnections, fetchBudgets, fetchAnomalies]);
 
   useEffect(() => {
     if (selectedConnectionId || (connections.length === 1 && !connLoading)) {
@@ -178,10 +283,34 @@ const CostOverview = () => {
           </p>
         </div>
 
-        <button className="btn btn-secondary" onClick={loadAllCostData} disabled={mtdCost.loading || connLoading}>
-          <RefreshCw size={16} className={mtdCost.loading ? 'spinner' : ''} style={mtdCost.loading ? { animation: 'spin 1s linear infinite' } : {}} />
-          <span>Refresh Data</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleExport('csv')}
+            disabled={exporting || connections.length === 0}
+            title="Export Cost Data as CSV"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+          >
+            <Download size={15} />
+            <span>CSV</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleExport('xlsx')}
+            disabled={exporting || connections.length === 0}
+            title="Export Cost Data as Excel (.xlsx)"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+          >
+            <Download size={15} />
+            <span>Excel</span>
+          </button>
+
+          <button className="btn btn-secondary" onClick={loadAllCostData} disabled={mtdCost.loading || connLoading} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+            <RefreshCw size={15} className={mtdCost.loading ? 'spinner' : ''} style={mtdCost.loading ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Distinction Banner: Actual Billed Cost vs Potential Savings */}
@@ -489,6 +618,319 @@ const CostOverview = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Phase 8: Budget Management Section */}
+      <div className="card" style={{ marginTop: '2rem' }}>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+            <Target size={22} style={{ color: 'var(--accent-primary)' }} />
+            <span className="card-title">Cloud Budget Alerts</span>
+          </div>
+
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowCreateBudgetModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+          >
+            <Plus size={16} />
+            <span>Create Budget</span>
+          </button>
+        </div>
+
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+          Configure monthly spending thresholds. Automated alerts are sent via Gmail when warning or critical spending levels are crossed.
+        </p>
+
+        {budgets.loading ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+            Loading budgets...
+          </div>
+        ) : budgets.data.length === 0 ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            No budgets configured yet. Click "Create Budget" above to set spending guardrails.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {budgets.data.map(b => {
+              const isCrit = b.alert_status === 'CRITICAL';
+              const isWarn = b.alert_status === 'WARNING';
+              const barColor = isCrit ? 'var(--status-danger)' : isWarn ? 'var(--status-warning)' : 'var(--accent-primary)';
+
+              return (
+                <div
+                  key={b.id}
+                  style={{
+                    padding: '1rem',
+                    backgroundColor: 'var(--bg-secondary)',
+                    borderRadius: '8px',
+                    border: `1px solid ${isCrit ? 'var(--status-danger)' : 'var(--border-color)'}`
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontWeight: '700', color: 'var(--text-primary)', fontSize: '1rem' }}>{b.name}</span>
+                        <span className={`badge ${isCrit ? 'badge-danger' : isWarn ? 'badge-warning' : 'badge-success'}`}>
+                          {b.alert_status}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                        Sub: {b.subscription_id} {b.resource_group ? `| RG: ${b.resource_group}` : '| Entire Subscription'}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: '700', color: 'var(--text-primary)', fontSize: '1rem' }}>
+                          {formatCurrency(b.current_spend, b.currency)} / {formatCurrency(b.monthly_amount, b.currency)}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          {b.percent_used}% used (Warn: {b.warning_threshold_pct}%, Crit: {b.critical_threshold_pct}%)
+                        </div>
+                      </div>
+
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => handleDeleteBudget(b.id)}
+                        style={{ padding: '0.4rem', border: 'none', color: 'var(--text-muted)' }}
+                        title="Delete Budget"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div style={{ width: '100%', height: '8px', backgroundColor: 'var(--bg-card)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${Math.min(100, b.percent_used)}%`,
+                        height: '100%',
+                        backgroundColor: barColor,
+                        borderRadius: '4px',
+                        transition: 'width 0.4s ease'
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Phase 8: Cost Anomalies Section */}
+      <div className="card" style={{ marginTop: '2rem' }}>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+            <AlertTriangle size={22} style={{ color: 'var(--status-warning)' }} />
+            <span className="card-title">Cost Anomalies</span>
+          </div>
+
+          <button
+            className="btn btn-secondary"
+            onClick={fetchAnomalies}
+            style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+          >
+            <RefreshCw size={14} className={anomalies.loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+          Statistical anomaly detection compares daily resource costs against rolling baseline historical spend.
+        </p>
+
+        {anomalies.loading ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+            Evaluating cost data for anomalies...
+          </div>
+        ) : anomalies.data.length === 0 ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            ✓ No cost anomalies detected. All resource expenditures are operating within standard historical baselines.
+          </div>
+        ) : (
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Detected Date</th>
+                  <th>Resource</th>
+                  <th>Actual Cost</th>
+                  <th>Expected Baseline</th>
+                  <th>Deviation</th>
+                  <th>Severity</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {anomalies.data.map(an => (
+                  <tr key={an.id}>
+                    <td style={{ fontSize: '0.85rem', whiteSpace: 'nowrap' }}>{an.detected_date ? an.detected_date.slice(0, 10) : 'Recent'}</td>
+                    <td>
+                      <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '0.875rem' }}>
+                        {an.resource_name || 'Subscription Spend'}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {an.resource_group || an.subscription_id}
+                      </div>
+                    </td>
+                    <td style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
+                      {formatCurrency(an.actual_cost)}
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)' }}>
+                      {formatCurrency(an.expected_cost)}
+                    </td>
+                    <td style={{ fontWeight: '700', color: an.deviation_percentage > 60 ? 'var(--status-danger)' : 'var(--status-warning)' }}>
+                      +{an.deviation_percentage}%
+                    </td>
+                    <td>
+                      <span className={`badge ${an.severity === 'CRITICAL' ? 'badge-danger' : an.severity === 'HIGH' ? 'badge-warning' : 'badge-info'}`}>
+                        {an.severity}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge ${an.status === 'ACKNOWLEDGED' ? 'badge-secondary' : 'badge-danger'}`}>
+                        {an.status}
+                      </span>
+                    </td>
+                    <td>
+                      {an.status === 'OPEN' ? (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleAcknowledgeAnomaly(an.id)}
+                          disabled={acknowledgingId === an.id}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                        >
+                          <Check size={14} />
+                          <span>{acknowledgingId === an.id ? 'Saving...' : 'Acknowledge'}</span>
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Acknowledged</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Create Budget Modal */}
+      {showCreateBudgetModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem'
+        }}>
+          <div className="card" style={{ maxWidth: '480px', width: '100%', margin: 0 }}>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Target size={20} style={{ color: 'var(--accent-primary)' }} />
+                <span className="card-title">Create Monthly Budget</span>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowCreateBudgetModal(false)}
+                style={{ padding: '0.25rem', border: 'none' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {budgetError && (
+              <div style={{ padding: '0.75rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--status-danger)', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                {budgetError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateBudget}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '0.25rem' }}>
+                  Budget Name
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  style={{ width: '100%' }}
+                  placeholder="e.g. Production Compute Budget"
+                  required
+                  value={newBudget.name}
+                  onChange={(e) => setNewBudget({ ...newBudget, name: e.target.value })}
+                />
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '0.25rem' }}>
+                  Monthly Limit Amount ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  className="form-control"
+                  style={{ width: '100%' }}
+                  placeholder="e.g. 500.00"
+                  required
+                  value={newBudget.monthlyAmount}
+                  onChange={(e) => setNewBudget({ ...newBudget, monthlyAmount: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '0.25rem' }}>
+                    Warning (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    className="form-control"
+                    style={{ width: '100%' }}
+                    value={newBudget.warningThresholdPct}
+                    onChange={(e) => setNewBudget({ ...newBudget, warningThresholdPct: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '0.25rem' }}>
+                    Critical (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="200"
+                    className="form-control"
+                    style={{ width: '100%' }}
+                    value={newBudget.criticalThresholdPct}
+                    onChange={(e) => setNewBudget({ ...newBudget, criticalThresholdPct: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowCreateBudgetModal(false)}
+                  disabled={creatingBudget}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={creatingBudget}
+                >
+                  {creatingBudget ? 'Saving...' : 'Save Budget'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

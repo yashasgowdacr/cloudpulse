@@ -63,5 +63,15 @@ export const vmService = {
       { params }
     );
     return response.data;
+  },
+
+  async bulkDeallocate(connectionId, vms = []) {
+    const response = await api.post('/azure/vms/bulk/deallocate', { connectionId, vms });
+    return response.data;
+  },
+
+  async bulkStart(connectionId, vms = []) {
+    const response = await api.post('/azure/vms/bulk/start', { connectionId, vms });
+    return response.data;
   }
 };

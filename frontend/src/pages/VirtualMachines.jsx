@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { azureConnectionService } from '../services/azureConnectionService';
 import { vmService } from '../services/vmService';
 import { dashboardService } from '../services/dashboardService';
+import { exportService } from '../services/exportService';
 import { Link } from 'react-router-dom';
 import {
   Server,
@@ -18,7 +19,8 @@ import {
   X,
   Play,
   Pause,
-  Power
+  Power,
+  Download
 } from 'lucide-react';
 
 const safeText = (val, fallback = '') => {
@@ -55,6 +57,80 @@ const VirtualMachines = () => {
   const [savings, setSavings] = useState({ loading: false, data: null, error: null });
   const [deallocating, setDeallocating] = useState(false);
   const [deallocateMsg, setDeallocateMsg] = useState(null);
+  const [exporting, setExporting] = useState(false);
+
+  // Bulk Operations State (Phase 9)
+  const [selectedVmKeys, setSelectedVmKeys] = useState([]);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkResults, setBulkResults] = useState(null);
+  const [showBulkDeallocateModal, setShowBulkDeallocateModal] = useState(false);
+  const [showBulkStartModal, setShowBulkStartModal] = useState(false);
+
+  const toggleSelectVm = (key) => {
+    setSelectedVmKeys(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  const handleSelectAllNonProtected = () => {
+    const nonProtectedKeys = vms
+      .filter(v => !v.isProtected)
+      .map(v => `${v.resourceGroup}::${v.name}`);
+    setSelectedVmKeys(nonProtectedKeys);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedVmKeys([]);
+  };
+
+  const getSelectedVmObjects = () => {
+    return vms
+      .filter(v => selectedVmKeys.includes(`${v.resourceGroup}::${v.name}`))
+      .map(v => ({ resourceGroup: v.resourceGroup, vmName: v.name }));
+  };
+
+  const executeBulkDeallocate = async () => {
+    setBulkProcessing(true);
+    try {
+      const selectedList = getSelectedVmObjects();
+      const res = await vmService.bulkDeallocate(selectedConnectionId, selectedList);
+      setBulkResults(res);
+      setShowBulkDeallocateModal(false);
+      setSelectedVmKeys([]);
+      await fetchVirtualMachines();
+    } catch (err) {
+      console.error('Bulk deallocate failed:', err);
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  const executeBulkStart = async () => {
+    setBulkProcessing(true);
+    try {
+      const selectedList = getSelectedVmObjects();
+      const res = await vmService.bulkStart(selectedConnectionId, selectedList);
+      setBulkResults(res);
+      setShowBulkStartModal(false);
+      setSelectedVmKeys([]);
+      await fetchVirtualMachines();
+    } catch (err) {
+      console.error('Bulk start failed:', err);
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  const handleExport = async (format) => {
+    setExporting(true);
+    try {
+      await exportService.exportVms(selectedConnectionId, format);
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // 1. Fetch Azure Connections
   const fetchConnections = useCallback(async () => {
@@ -210,10 +286,34 @@ const VirtualMachines = () => {
           </p>
         </div>
 
-        <button className="btn btn-secondary" onClick={fetchVirtualMachines} disabled={vmLoading || connLoading}>
-          <RefreshCw size={16} className={vmLoading ? 'spinner' : ''} style={vmLoading ? { animation: 'spin 1s linear infinite' } : {}} />
-          <span>Discover VMs</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleExport('csv')}
+            disabled={exporting || vms.length === 0}
+            title="Export VM Inventory as CSV"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+          >
+            <Download size={15} />
+            <span>CSV</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleExport('xlsx')}
+            disabled={exporting || vms.length === 0}
+            title="Export VM Inventory as Excel (.xlsx)"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+          >
+            <Download size={15} />
+            <span>Excel</span>
+          </button>
+
+          <button className="btn btn-primary" onClick={fetchVirtualMachines} disabled={vmLoading || connLoading} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+            <RefreshCw size={15} className={vmLoading ? 'spinner' : ''} style={vmLoading ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>Discover VMs</span>
+          </button>
+        </div>
       </div>
 
       {/* Policy Awareness Header Banner */}
@@ -332,45 +432,147 @@ const VirtualMachines = () => {
             <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
               No virtual machines discovered in this Azure subscription. Click "Discover VMs" to rescan.
             </div>
-          ) : vms.length > 0 && (
+          ) : (
             <div className="table-container">
+              {/* Floating Bulk Action Bar (Phase 9) */}
+              {selectedVmKeys.length > 0 && (
+                <div style={{
+                  padding: '0.875rem 1.25rem',
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderBottom: '1px solid var(--border-color)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '0.75rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span style={{ fontWeight: '700', color: 'var(--text-primary)', fontSize: '0.875rem' }}>
+                      {selectedVmKeys.length} VM(s) selected
+                    </span>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleSelectAllNonProtected}
+                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                    >
+                      Select All Non-Protected
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleClearSelection}
+                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setShowBulkStartModal(true)}
+                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                    >
+                      <Play size={14} />
+                      <span>Bulk Start</span>
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => setShowBulkDeallocateModal(true)}
+                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem', borderColor: 'var(--status-danger)', color: 'var(--status-danger)' }}
+                    >
+                      <Power size={14} />
+                      <span>Bulk Deallocate</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: '40px', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedVmKeys.length > 0 && selectedVmKeys.length === vms.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedVmKeys(vms.map(v => `${v.resourceGroup}::${v.name}`));
+                          } else {
+                            setSelectedVmKeys([]);
+                          }
+                        }}
+                      />
+                    </th>
+                    <th>Provider</th>
                     <th>VM Name</th>
                     <th>Resource Group</th>
                     <th>Region</th>
-                    <th>Size</th>
+                    <th>Policy Explanation</th>
                     <th>Status</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {vms.map((vm, idx) => (
-                    <tr key={idx}>
-                      <td style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
-                        {vm.name}
-                      </td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                        {vm.resourceGroup}
-                      </td>
-                      <td>{vm.location || 'N/A'}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
-                        {vm.size || 'N/A'}
-                      </td>
-                      <td>{renderStatusBadge(vm.status)}</td>
-                      <td>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-                          onClick={() => loadVmDetails(vm)}
-                        >
-                          <Eye size={14} />
-                          <span>View Details</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {vms.map((vm, idx) => {
+                    const vmKey = `${vm.resourceGroup}::${vm.name}`;
+                    const isSelected = selectedVmKeys.includes(vmKey);
+                    const providerName = (vm.provider || 'AZURE').toUpperCase();
+
+                    return (
+                      <tr key={idx} style={isSelected ? { backgroundColor: 'rgba(59, 130, 246, 0.05)' } : {}}>
+                        <td style={{ textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectVm(vmKey)}
+                          />
+                        </td>
+                        <td>
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '0.7rem',
+                              fontWeight: '700',
+                              backgroundColor: providerName === 'AWS' ? 'rgba(245, 158, 11, 0.15)' : providerName === 'GCP' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(14, 165, 233, 0.15)',
+                              color: providerName === 'AWS' ? '#f59e0b' : providerName === 'GCP' ? '#22c55e' : '#0ea5e9'
+                            }}
+                          >
+                            {providerName}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
+                          {vm.name}
+                        </td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                          {vm.resourceGroup}
+                        </td>
+                        <td>{vm.location || 'N/A'}</td>
+                        <td style={{ fontSize: '0.8rem', maxWidth: '240px' }}>
+                          {vm.isProtected ? (
+                            <span style={{ color: 'var(--status-info)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <ShieldCheck size={14} style={{ flexShrink: 0 }} />
+                              <span>{vm.protectionReason || vm.policyExplanation || 'Protected'}</span>
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-secondary)' }}>
+                              {vm.policyExplanation || 'Active: Non-protected'}
+                            </span>
+                          )}
+                        </td>
+                        <td>{renderStatusBadge(vm.status)}</td>
+                        <td>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+                            onClick={() => loadVmDetails(vm)}
+                          >
+                            <Eye size={14} />
+                            <span>Details</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -626,6 +828,118 @@ const VirtualMachines = () => {
         </div>
       </div>
     )}
+
+    {/* Bulk Deallocate Modal */}
+    {showBulkDeallocateModal && (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem'
+      }}>
+        <div className="card" style={{ maxWidth: '480px', width: '100%', margin: 0 }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Power size={20} style={{ color: 'var(--status-danger)' }} />
+              <span className="card-title">Confirm Bulk Deallocation</span>
+            </div>
+            <button className="btn btn-secondary" onClick={() => setShowBulkDeallocateModal(false)} style={{ padding: '0.25rem', border: 'none' }}>
+              <X size={16} />
+            </button>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+            You are about to execute live deallocation commands on <strong>{selectedVmKeys.length}</strong> selected virtual machine(s).
+          </p>
+          <div style={{ padding: '0.75rem', backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: '6px', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+            <strong>Mandatory Invariant:</strong> Production workloads (matching "prod", Environment=production, or custom exclusion tags) are permanently protected and will be automatically skipped.
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button className="btn btn-secondary" onClick={() => setShowBulkDeallocateModal(false)} disabled={bulkProcessing}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={executeBulkDeallocate} disabled={bulkProcessing} style={{ backgroundColor: 'var(--status-danger)', borderColor: 'var(--status-danger)' }}>
+              {bulkProcessing ? 'Deallocating...' : 'Confirm Bulk Deallocate'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Bulk Start Modal */}
+    {showBulkStartModal && (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem'
+      }}>
+        <div className="card" style={{ maxWidth: '480px', width: '100%', margin: 0 }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Play size={20} style={{ color: 'var(--status-success)' }} />
+              <span className="card-title">Confirm Bulk Start</span>
+            </div>
+            <button className="btn btn-secondary" onClick={() => setShowBulkStartModal(false)} style={{ padding: '0.25rem', border: 'none' }}>
+              <X size={16} />
+            </button>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+            Power ON <strong>{selectedVmKeys.length}</strong> selected virtual machine(s)?
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button className="btn btn-secondary" onClick={() => setShowBulkStartModal(false)} disabled={bulkProcessing}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={executeBulkStart} disabled={bulkProcessing}>
+              {bulkProcessing ? 'Starting...' : 'Confirm Bulk Start'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Bulk Results Summary Modal */}
+    {bulkResults && (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem'
+      }}>
+        <div className="card" style={{ maxWidth: '520px', width: '100%', margin: 0 }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <CheckCircle2 size={20} style={{ color: 'var(--status-success)' }} />
+              <span className="card-title">Bulk Operation Results</span>
+            </div>
+            <button className="btn btn-secondary" onClick={() => setBulkResults(null)} style={{ padding: '0.25rem', border: 'none' }}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginBottom: '1.25rem', textAlign: 'center' }}>
+            <div style={{ padding: '0.5rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--status-success)' }}>{bulkResults.success?.length || 0}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Succeeded</div>
+            </div>
+            <div style={{ padding: '0.5rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--status-warning)' }}>{bulkResults.skipped?.length || 0}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Skipped</div>
+            </div>
+            <div style={{ padding: '0.5rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--status-info)' }}>{bulkResults.protected?.length || 0}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Protected</div>
+            </div>
+            <div style={{ padding: '0.5rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--status-danger)' }}>{bulkResults.failed?.length || 0}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Failed</div>
+            </div>
+          </div>
+
+          <button className="btn btn-secondary" onClick={() => setBulkResults(null)} style={{ width: '100%' }}>
+            Dismiss
+          </button>
+        </div>
+      </div>
+    )}
+
     </div>
   );
 };

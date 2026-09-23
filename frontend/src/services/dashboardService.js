@@ -24,5 +24,23 @@ export const dashboardService = {
   async getActionHistory() {
     const response = await api.get('/api/actions');
     return response.data;
+  },
+
+  async getKpiMetrics(connectionId, filters = {}) {
+    const params = { connectionId, ...filters };
+    const response = await api.get('/api/dashboard/kpis', { params });
+    return response.data;
+  },
+
+  async getCostTrends(connectionId, filters = {}) {
+    const params = { connectionId, ...filters };
+    const response = await api.get('/api/dashboard/trends', { params });
+    return response.data;
+  },
+
+  async getSavingsAnalytics(connectionId, filters = {}) {
+    const params = { connectionId, ...filters };
+    const response = await api.get('/api/dashboard/savings-analytics', { params });
+    return response.data;
   }
 };

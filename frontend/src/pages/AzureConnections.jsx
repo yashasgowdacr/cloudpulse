@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { azureConnectionService } from '../services/azureConnectionService';
+import { cloudService } from '../services/cloudService';
 import {
   Cloud,
   Plus,
@@ -11,9 +12,10 @@ import {
   EyeOff,
   X,
   RefreshCw,
-  Info,
-  Check,
-  Copy
+  Server,
+  Cpu,
+  Layers,
+  Check
 } from 'lucide-react';
 
 const GUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -22,22 +24,33 @@ function isValidGuid(val) {
   return typeof val === 'string' && GUID_REGEX.test(val.trim());
 }
 
+const AWS_REGIONS = [
+  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+  'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1'
+];
+
+const GCP_REGIONS = [
+  'us-central1-a', 'us-east1-b', 'us-west1-a',
+  'europe-west1-b', 'asia-east1-a', 'asia-south1-a'
+];
+
 const AzureConnections = () => {
+  const [activeProviderTab, setActiveProviderTab] = useState('AZURE'); // 'AZURE' | 'AWS' | 'GCP'
+
+  // Azure State
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-
-  // Selected Connection for multi-subscription support
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
 
-  // Add Connection Modal & Form State
+  // Add Azure Connection Modal & Form State
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
   const [showSecret, setShowSecret] = useState(false);
 
-  // Form Fields
+  // Azure Form Fields
   const [connectionName, setConnectionName] = useState('');
   const [tenantId, setTenantId] = useState('');
   const [subscriptionId, setSubscriptionId] = useState('');
@@ -48,7 +61,22 @@ const AzureConnections = () => {
   const [disconnectingConn, setDisconnectingConn] = useState(null);
   const [disconnectLoading, setDisconnectLoading] = useState(false);
 
-  // Fetch Connections List
+  // Multi-Cloud State (AWS & GCP)
+  const [cloudConnections, setCloudConnections] = useState([]);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [isAddCloudOpen, setIsAddCloudOpen] = useState(false);
+  const [cloudFormLoading, setCloudFormLoading] = useState(false);
+  const [cloudFormError, setCloudFormError] = useState('');
+  const [showCloudSecret, setShowCloudSecret] = useState(false);
+
+  // Cloud Form Fields
+  const [cloudConnName, setCloudConnName] = useState('');
+  const [cloudAccountId, setCloudAccountId] = useState('');
+  const [cloudRegion, setCloudRegion] = useState('');
+  const [cloudAccessKey, setCloudAccessKey] = useState('');
+  const [cloudSecret, setCloudSecret] = useState('');
+
+  // Fetch Azure Connections List
   const fetchConnections = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -57,7 +85,6 @@ const AzureConnections = () => {
       const list = data.connections || [];
       setConnections(list);
 
-      // Default selectedConnectionId to first active connection if not already set
       const activeList = list.filter((c) => c.status === 'ACTIVE');
       if (activeList.length > 0 && !selectedConnectionId) {
         setSelectedConnectionId(activeList[0].id);
@@ -70,27 +97,56 @@ const AzureConnections = () => {
     }
   }, [selectedConnectionId]);
 
+  // Fetch Multi-Cloud Connections
+  const fetchCloudConnections = useCallback(async () => {
+    setCloudLoading(true);
+    try {
+      const data = await cloudService.getConnections();
+      setCloudConnections(data.connections || []);
+    } catch (err) {
+      console.error('Failed to load multi-cloud connections:', err);
+    } finally {
+      setCloudLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchConnections();
-  }, [fetchConnections]);
+    fetchCloudConnections();
+  }, [fetchConnections, fetchCloudConnections]);
 
-  // Form Reset Helper (Crucial for Secret Memory Safety)
-  const resetForm = () => {
+  // Form Reset Helpers
+  const resetAzureForm = () => {
     setConnectionName('');
     setTenantId('');
     setSubscriptionId('');
     setClientId('');
-    setClientSecret(''); // Immediately clear secret from state
+    setClientSecret('');
     setShowSecret(false);
     setFormError('');
   };
 
+  const resetCloudForm = () => {
+    setCloudConnName('');
+    setCloudAccountId('');
+    setCloudRegion(activeProviderTab === 'AWS' ? 'us-east-1' : 'us-central1-a');
+    setCloudAccessKey('');
+    setCloudSecret('');
+    setShowCloudSecret(false);
+    setCloudFormError('');
+  };
+
   const handleCloseAddModal = () => {
-    resetForm();
+    resetAzureForm();
     setIsAddOpen(false);
   };
 
-  // Submit Add Connection Form
+  const handleCloseAddCloudModal = () => {
+    resetCloudForm();
+    setIsAddCloudOpen(false);
+  };
+
+  // Submit Add Azure Connection Form
   const handleAddSubmit = async (e) => {
     e.preventDefault();
     setFormError('');
@@ -100,7 +156,6 @@ const AzureConnections = () => {
     const trimmedSub = subscriptionId.trim();
     const trimmedClient = clientId.trim();
 
-    // Client-side Validation
     if (!trimmedName) {
       setFormError('Connection Name is required.');
       return;
@@ -110,15 +165,15 @@ const AzureConnections = () => {
       return;
     }
     if (!isValidGuid(trimmedTenant)) {
-      setFormError('Tenant ID must be a valid GUID format (e.g. 00000000-0000-0000-0000-000000000000).');
+      setFormError('Tenant ID must be a valid GUID format.');
       return;
     }
     if (!isValidGuid(trimmedSub)) {
-      setFormError('Subscription ID must be a valid GUID format (e.g. 00000000-0000-0000-0000-000000000000).');
+      setFormError('Subscription ID must be a valid GUID format.');
       return;
     }
     if (!isValidGuid(trimmedClient)) {
-      setFormError('Client ID must be a valid GUID format (e.g. 00000000-0000-0000-0000-000000000000).');
+      setFormError('Client ID must be a valid GUID format.');
       return;
     }
     if (!clientSecret) {
@@ -129,7 +184,6 @@ const AzureConnections = () => {
     setFormLoading(true);
 
     try {
-      // Backend validates credentials against Azure API before inserting
       await azureConnectionService.createAzureConnection({
         connectionName: trimmedName,
         tenantId: trimmedTenant,
@@ -138,8 +192,7 @@ const AzureConnections = () => {
         clientSecret
       });
 
-      // Clear secret from React memory immediately
-      resetForm();
+      resetAzureForm();
       setIsAddOpen(false);
       setSuccessMsg('Azure connection added and validated successfully.');
 
@@ -150,7 +203,7 @@ const AzureConnections = () => {
         setFormError('This Azure subscription is already connected to your CloudPulse account.');
       } else if (err.response?.status === 400) {
         const detail = err.response.data?.details ? ` (${err.response.data.details})` : '';
-        setFormError(`Unable to validate Azure credentials. Please check your Tenant ID, Subscription ID, Client ID and Client Secret.${detail}`);
+        setFormError(`Unable to validate Azure credentials. Please check your credentials.${detail}`);
       } else {
         const msg = err.response?.data?.error || err.response?.data?.message || 'Failed to add Azure connection.';
         setFormError(msg);
@@ -160,7 +213,53 @@ const AzureConnections = () => {
     }
   };
 
-  // Soft Disconnect Handler
+  // Submit Add Cloud Connection Form (AWS / GCP)
+  const handleAddCloudSubmit = async (e) => {
+    e.preventDefault();
+    setCloudFormError('');
+
+    if (!cloudConnName.trim()) {
+      setCloudFormError('Connection Name is required.');
+      return;
+    }
+    if (!cloudAccountId.trim()) {
+      setCloudFormError(activeProviderTab === 'AWS' ? 'AWS Account ID / Alias is required.' : 'GCP Project ID is required.');
+      return;
+    }
+    if (!cloudAccessKey.trim()) {
+      setCloudFormError(activeProviderTab === 'AWS' ? 'AWS Access Key ID is required.' : 'Service Account Email is required.');
+      return;
+    }
+    if (!cloudSecret.trim()) {
+      setCloudFormError(activeProviderTab === 'AWS' ? 'AWS Secret Access Key is required.' : 'Private Key is required.');
+      return;
+    }
+
+    setCloudFormLoading(true);
+
+    try {
+      await cloudService.createConnection({
+        provider: activeProviderTab,
+        connectionName: cloudConnName.trim(),
+        accountOrSubscriptionId: cloudAccountId.trim(),
+        tenantOrRegion: cloudRegion.trim(),
+        clientOrAccessKey: cloudAccessKey.trim(),
+        secret: cloudSecret.trim()
+      });
+
+      resetCloudForm();
+      setIsAddCloudOpen(false);
+      setSuccessMsg(`${activeProviderTab} connection created and credentials encrypted with AES-256-GCM.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchCloudConnections();
+    } catch (err) {
+      setCloudFormError(err.response?.data?.message || `Failed to create ${activeProviderTab} connection.`);
+    } finally {
+      setCloudFormLoading(false);
+    }
+  };
+
+  // Soft Disconnect Handler (Azure)
   const handleConfirmDisconnect = async () => {
     if (!disconnectingConn) return;
     setDisconnectLoading(true);
@@ -169,7 +268,6 @@ const AzureConnections = () => {
       setSuccessMsg(`Connection "${disconnectingConn.connectionName}" disconnected successfully.`);
       setTimeout(() => setSuccessMsg(''), 4000);
 
-      // Update list in state
       setConnections((prev) =>
         prev.map((c) => (c.id === disconnectingConn.id ? { ...c, status: 'DISCONNECTED' } : c))
       );
@@ -180,6 +278,19 @@ const AzureConnections = () => {
       setError(msg);
     } finally {
       setDisconnectLoading(false);
+    }
+  };
+
+  // Delete Cloud Connection (AWS / GCP)
+  const handleDeleteCloudConnection = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to remove connection "${name}"?`)) return;
+    try {
+      await cloudService.deleteConnection(id);
+      setSuccessMsg(`Connection "${name}" removed.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      fetchCloudConnections();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to remove connection.');
     }
   };
 
@@ -200,6 +311,7 @@ const AzureConnections = () => {
   };
 
   const activeConnections = connections.filter((c) => c.status === 'ACTIVE');
+  const filteredCloudConns = cloudConnections.filter(c => c.provider === activeProviderTab);
 
   return (
     <div>
@@ -207,23 +319,94 @@ const AzureConnections = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-            Azure Connections
+            Cloud Connections
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-            Register & manage Azure Service Principal credentials with AES-256-GCM encryption
+            Register & manage multi-cloud credentials with AES-256-GCM encryption at rest
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button className="btn btn-secondary" onClick={fetchConnections} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'spinner' : ''} style={loading ? { animation: 'spin 1s linear infinite' } : {}} />
+          <button className="btn btn-secondary" onClick={() => { fetchConnections(); fetchCloudConnections(); }} disabled={loading || cloudLoading}>
+            <RefreshCw size={16} className={loading || cloudLoading ? 'spinner' : ''} style={loading || cloudLoading ? { animation: 'spin 1s linear infinite' } : {}} />
             <span>Refresh</span>
           </button>
-          <button className="btn btn-primary" onClick={() => { resetForm(); setIsAddOpen(true); }}>
-            <Plus size={18} />
-            <span>Add Connection</span>
-          </button>
+
+          {activeProviderTab === 'AZURE' ? (
+            <button className="btn btn-primary" onClick={() => { resetAzureForm(); setIsAddOpen(true); }}>
+              <Plus size={18} />
+              <span>Add Azure Connection</span>
+            </button>
+          ) : (
+            <button className="btn btn-primary" onClick={() => { resetCloudForm(); setIsAddCloudOpen(true); }}>
+              <Plus size={18} />
+              <span>Add {activeProviderTab} Connection</span>
+            </button>
+          )}
         </div>
+      </div>
+
+      {/* Provider Tabs */}
+      <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1.5rem' }}>
+        <button
+          onClick={() => setActiveProviderTab('AZURE')}
+          style={{
+            padding: '0.75rem 1rem',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeProviderTab === 'AZURE' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+            color: activeProviderTab === 'AZURE' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}
+        >
+          <Cloud size={18} />
+          Microsoft Azure ({connections.length})
+        </button>
+
+        <button
+          onClick={() => setActiveProviderTab('AWS')}
+          style={{
+            padding: '0.75rem 1rem',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeProviderTab === 'AWS' ? '2px solid #f59e0b' : '2px solid transparent',
+            color: activeProviderTab === 'AWS' ? '#f59e0b' : 'var(--text-secondary)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}
+        >
+          <Server size={18} />
+          Amazon Web Services (AWS EC2) ({cloudConnections.filter(c => c.provider === 'AWS').length})
+        </button>
+
+        <button
+          onClick={() => setActiveProviderTab('GCP')}
+          style={{
+            padding: '0.75rem 1rem',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeProviderTab === 'GCP' ? '2px solid #ef4444' : '2px solid transparent',
+            color: activeProviderTab === 'GCP' ? '#ef4444' : 'var(--text-secondary)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}
+        >
+          <Layers size={18} />
+          Google Cloud Platform (GCP) ({cloudConnections.filter(c => c.provider === 'GCP').length})
+        </button>
       </div>
 
       {/* Safety Notice Banner */}
@@ -241,7 +424,7 @@ const AzureConnections = () => {
           <ShieldCheck size={24} />
         </div>
         <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-          <strong style={{ color: 'var(--text-primary)' }}>Azure Safety Commitment:</strong> CloudPulse uses your Azure Service Principal to monitor resources and calculate optimization opportunities. Credentials are stored using AES-256-GCM encryption and plaintext secrets are never exposed in JavaScript or APIs.
+          <strong style={{ color: 'var(--text-primary)' }}>Multi-Cloud Credential Safety:</strong> CloudPulse encrypts all access keys, client secrets, and service-account tokens using <strong>AES-256-GCM</strong> encryption at rest. Plaintext secrets are never logged or exposed in HTTP responses.
         </div>
       </div>
 
@@ -283,154 +466,225 @@ const AzureConnections = () => {
         </div>
       )}
 
-      {/* Multiple Active Connections Selector Bar */}
-      {activeConnections.length > 1 && (
-        <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-            <Cloud size={20} style={{ color: 'var(--accent-primary)' }} />
-            <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-primary)' }}>
-              Active Azure Subscription Context:
-            </span>
-          </div>
+      {/* TAB 1: AZURE CONNECTIONS */}
+      {activeProviderTab === 'AZURE' && (
+        <div>
+          {/* Multiple Active Connections Selector Bar */}
+          {activeConnections.length > 1 && (
+            <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+                <Cloud size={20} style={{ color: 'var(--accent-primary)' }} />
+                <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-primary)' }}>
+                  Active Azure Subscription Context:
+                </span>
+              </div>
 
-          <div style={{ minWidth: '280px' }}>
-            <select
-              value={selectedConnectionId}
-              onChange={(e) => setSelectedConnectionId(e.target.value)}
-              style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--accent-primary)', fontWeight: '500' }}
-            >
-              {activeConnections.map((conn) => (
-                <option key={conn.id} value={conn.id}>
-                  {conn.connectionName} ({conn.subscriptionId})
-                </option>
-              ))}
-            </select>
+              <div style={{ minWidth: '280px' }}>
+                <select
+                  value={selectedConnectionId}
+                  onChange={(e) => setSelectedConnectionId(e.target.value)}
+                  style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--accent-primary)', fontWeight: '500' }}
+                >
+                  {activeConnections.map((conn) => (
+                    <option key={conn.id} value={conn.id}>
+                      {conn.connectionName} ({conn.subscriptionId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Main Azure Connection Table */}
+          <div className="card">
+            <div className="card-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Cloud size={22} style={{ color: 'var(--accent-primary)' }} />
+                <span className="card-title">Registered Azure Subscriptions</span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Metrics: LIVE</span>
+                <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Cost API: ACTIVE</span>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="loading-center" style={{ padding: '3rem' }}>
+                <div className="spinner"></div>
+                <p style={{ fontSize: '0.875rem' }}>Loading Azure connections...</p>
+              </div>
+            ) : connections.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
+                <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(14, 165, 233, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)', margin: '0 auto 1rem' }}>
+                  <Cloud size={28} />
+                </div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
+                  No Azure subscriptions connected
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', maxWidth: '460px', margin: '0 auto 1.5rem', fontSize: '0.875rem' }}>
+                  CloudPulse uses your Azure Service Principal to monitor virtual machine resources and calculate real optimization opportunities.
+                </p>
+                <button className="btn btn-primary" onClick={() => { resetAzureForm(); setIsAddOpen(true); }}>
+                  <Plus size={18} />
+                  <span>Add Azure Connection</span>
+                </button>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Connection Name</th>
+                      <th>Subscription ID</th>
+                      <th>Tenant ID</th>
+                      <th>Client ID</th>
+                      <th>Status</th>
+                      <th>Created At</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {connections.map((conn) => (
+                      <tr key={conn.id}>
+                        <td style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
+                          {conn.connectionName}
+                        </td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
+                          {conn.subscriptionId}
+                        </td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                          {conn.tenantId}
+                        </td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                          {conn.clientId}
+                        </td>
+                        <td>{renderStatusBadge(conn.status)}</td>
+                        <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                          {new Date(conn.createdAt).toLocaleDateString()}
+                        </td>
+                        <td>
+                          {conn.status === 'ACTIVE' ? (
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', color: 'var(--status-error)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                              onClick={() => setDisconnectingConn(conn)}
+                            >
+                              <Trash2 size={14} />
+                              <span>Disconnect</span>
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No Action</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Main Connection Table / Cards */}
-      <div className="card">
-        <div className="card-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <Cloud size={22} style={{ color: 'var(--accent-primary)' }} />
-            <span className="card-title">Registered Azure Subscriptions</span>
-          </div>
-          <span className="badge badge-info">{connections.length} Total</span>
-        </div>
-
-        {loading ? (
-          <div className="loading-center" style={{ padding: '3rem' }}>
-            <div className="spinner"></div>
-            <p style={{ fontSize: '0.875rem' }}>Loading Azure connections...</p>
-          </div>
-        ) : connections.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
-            <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(14, 165, 233, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)', margin: '0 auto 1rem' }}>
-              <Cloud size={28} />
+      {/* TAB 2 & 3: AWS & GCP CONNECTIONS */}
+      {(activeProviderTab === 'AWS' || activeProviderTab === 'GCP') && (
+        <div className="card">
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <Server size={22} style={{ color: activeProviderTab === 'AWS' ? '#f59e0b' : '#ef4444' }} />
+              <span className="card-title">Connected {activeProviderTab} Environments</span>
             </div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
-              No Azure subscriptions connected
-            </h3>
-            <p style={{ color: 'var(--text-secondary)', maxWidth: '460px', margin: '0 auto 1.5rem', fontSize: '0.875rem' }}>
-              CloudPulse uses your Azure Service Principal to monitor virtual machine resources and calculate real optimization opportunities.
-            </p>
-            <button className="btn btn-primary" onClick={() => { resetForm(); setIsAddOpen(true); }}>
-              <Plus size={18} />
-              <span>Add Azure Connection</span>
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Discovery: ENABLED</span>
+              <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Lifecycle (Start/Stop): READY</span>
+              <span className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>Billing: OPTIONAL</span>
+            </div>
           </div>
-        ) : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Connection Name</th>
-                  <th>Subscription ID</th>
-                  <th>Tenant ID</th>
-                  <th>Client ID</th>
-                  <th>Status</th>
-                  <th>Created At</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {connections.map((conn) => (
-                  <tr key={conn.id}>
-                    <td style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
-                      {conn.connectionName}
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
-                      {conn.subscriptionId}
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                      {conn.tenantId}
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                      {conn.clientId}
-                    </td>
-                    <td>{renderStatusBadge(conn.status)}</td>
-                    <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                      {new Date(conn.createdAt).toLocaleDateString()}
-                    </td>
-                    <td>
-                      {conn.status === 'ACTIVE' ? (
+
+          {cloudLoading ? (
+            <div className="loading-center" style={{ padding: '3rem' }}>
+              <div className="spinner"></div>
+              <p style={{ fontSize: '0.875rem' }}>Loading {activeProviderTab} connections...</p>
+            </div>
+          ) : filteredCloudConns.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: activeProviderTab === 'AWS' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: activeProviderTab === 'AWS' ? '#f59e0b' : '#ef4444', margin: '0 auto 1rem' }}>
+                <Server size={28} />
+              </div>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
+                No {activeProviderTab} connections configured
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', maxWidth: '460px', margin: '0 auto 1.5rem', fontSize: '0.875rem' }}>
+                {activeProviderTab === 'AWS'
+                  ? 'Connect your AWS IAM Access Key to discover EC2 instances, monitor CPU metrics, and automate start/stop schedules.'
+                  : 'Connect your GCP Service Account to discover Compute Engine instances, monitor CPU metrics, and optimize runtime.'
+                }
+              </p>
+              <button className="btn btn-primary" onClick={() => { resetCloudForm(); setIsAddCloudOpen(true); }}>
+                <Plus size={18} />
+                <span>Add {activeProviderTab} Connection</span>
+              </button>
+            </div>
+          ) : (
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Connection Name</th>
+                    <th>{activeProviderTab === 'AWS' ? 'Account ID / Alias' : 'Project ID'}</th>
+                    <th>Region / Zone</th>
+                    <th>{activeProviderTab === 'AWS' ? 'Access Key ID' : 'Service Account Email'}</th>
+                    <th>Status</th>
+                    <th>Created At</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCloudConns.map((c) => (
+                    <tr key={c.id}>
+                      <td style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{c.connection_name}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>{c.account_or_subscription_id}</td>
+                      <td style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>{c.tenant_or_region || 'default'}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>{c.client_or_access_key}</td>
+                      <td>{renderStatusBadge(c.status)}</td>
+                      <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{new Date(c.created_at).toLocaleDateString()}</td>
+                      <td>
                         <button
                           className="btn btn-secondary"
                           style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', color: 'var(--status-error)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
-                          onClick={() => setDisconnectingConn(conn)}
+                          onClick={() => handleDeleteCloudConnection(c.id, c.connection_name)}
                         >
                           <Trash2 size={14} />
-                          <span>Disconnect</span>
+                          <span>Remove</span>
                         </button>
-                      ) : (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No Action</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Add Azure Connection Modal */}
       {isAddOpen && (
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '1rem'
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: '1rem'
         }}>
           <div style={{
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-lg)',
-            width: '100%',
-            maxWidth: '560px',
-            padding: '2rem',
-            boxShadow: 'var(--shadow-lg)',
-            maxHeight: '90vh',
-            overflowY: 'auto'
+            backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: '560px',
+            padding: '2rem', boxShadow: 'var(--shadow-lg)', maxHeight: '90vh', overflowY: 'auto'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <h2 style={{ fontSize: '1.375rem', fontWeight: '700', color: 'var(--text-primary)' }}>
                 Add Azure Connection
               </h2>
-              <button
-                onClick={handleCloseAddModal}
-                disabled={formLoading}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-              >
+              <button onClick={handleCloseAddModal} disabled={formLoading} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
@@ -440,18 +694,7 @@ const AzureConnections = () => {
             </p>
 
             {formError && (
-              <div style={{
-                backgroundColor: 'var(--status-error-bg)',
-                border: '1px solid rgba(239, 68, 68, 0.4)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.75rem 1rem',
-                marginBottom: '1.25rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.625rem',
-                color: 'var(--status-error)',
-                fontSize: '0.875rem'
-              }}>
+              <div style={{ backgroundColor: 'var(--status-error-bg)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: 'var(--radius-sm)', padding: '0.75rem 1rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.625rem', color: 'var(--status-error)', fontSize: '0.875rem' }}>
                 <AlertCircle size={18} style={{ flexShrink: 0 }} />
                 <span>{formError}</span>
               </div>
@@ -462,60 +705,28 @@ const AzureConnections = () => {
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
                   Connection Name (Max 100 characters)
                 </label>
-                <input
-                  type="text"
-                  value={connectionName}
-                  onChange={(e) => setConnectionName(e.target.value)}
-                  placeholder="e.g. Production Azure Subscription"
-                  required
-                  disabled={formLoading}
-                  maxLength={100}
-                />
+                <input type="text" value={connectionName} onChange={(e) => setConnectionName(e.target.value)} placeholder="e.g. Production Azure Subscription" required disabled={formLoading} maxLength={100} />
               </div>
 
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
                   Tenant ID (GUID Format)
                 </label>
-                <input
-                  type="text"
-                  value={tenantId}
-                  onChange={(e) => setTenantId(e.target.value)}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  required
-                  disabled={formLoading}
-                  style={{ fontFamily: 'var(--font-mono)' }}
-                />
+                <input type="text" value={tenantId} onChange={(e) => setTenantId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" required disabled={formLoading} style={{ fontFamily: 'var(--font-mono)' }} />
               </div>
 
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
                   Subscription ID (GUID Format)
                 </label>
-                <input
-                  type="text"
-                  value={subscriptionId}
-                  onChange={(e) => setSubscriptionId(e.target.value)}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  required
-                  disabled={formLoading}
-                  style={{ fontFamily: 'var(--font-mono)' }}
-                />
+                <input type="text" value={subscriptionId} onChange={(e) => setSubscriptionId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" required disabled={formLoading} style={{ fontFamily: 'var(--font-mono)' }} />
               </div>
 
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
                   Client ID / Application ID (GUID Format)
                 </label>
-                <input
-                  type="text"
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  required
-                  disabled={formLoading}
-                  style={{ fontFamily: 'var(--font-mono)' }}
-                />
+                <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" required disabled={formLoading} style={{ fontFamily: 'var(--font-mono)' }} />
               </div>
 
               <div style={{ marginBottom: '1.5rem', position: 'relative' }}>
@@ -523,55 +734,108 @@ const AzureConnections = () => {
                   Client Secret
                 </label>
                 <div style={{ position: 'relative' }}>
-                  <input
-                    type={showSecret ? 'text' : 'password'}
-                    value={clientSecret}
-                    onChange={(e) => setClientSecret(e.target.value)}
-                    placeholder="••••••••••••••••••••••••"
-                    required
-                    disabled={formLoading}
-                    style={{ paddingRight: '2.5rem', fontFamily: 'var(--font-mono)' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowSecret(!showSecret)}
-                    tabIndex={-1}
-                    style={{
-                      position: 'absolute',
-                      right: '0.75rem',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      padding: '0.25rem'
-                    }}
-                    title={showSecret ? 'Hide secret' : 'Show secret'}
-                  >
+                  <input type={showSecret ? 'text' : 'password'} value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="••••••••••••••••••••••••" required disabled={formLoading} style={{ paddingRight: '2.5rem', fontFamily: 'var(--font-mono)' }} />
+                  <button type="button" onClick={() => setShowSecret(!showSecret)} tabIndex={-1} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.25rem' }} title={showSecret ? 'Hide secret' : 'Show secret'}>
                     {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={handleCloseAddModal} disabled={formLoading}>
-                  Cancel
-                </button>
+                <button type="button" className="btn btn-secondary" onClick={handleCloseAddModal} disabled={formLoading}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={formLoading}>
-                  {formLoading ? (
-                    <>
-                      <div className="spinner" style={{ width: '1.25rem', height: '1.25rem', borderWidth: '2px' }}></div>
-                      <span>Validating Azure credentials...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={18} />
-                      <span>Save & Validate Connection</span>
-                    </>
-                  )}
+                  {formLoading ? <span>Validating Azure credentials...</span> : <span>Save & Validate Connection</span>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add AWS / GCP Modal */}
+      {isAddCloudOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: '1rem'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: '540px',
+            padding: '2rem', boxShadow: 'var(--shadow-lg)', maxHeight: '90vh', overflowY: 'auto'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h2 style={{ fontSize: '1.375rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                Add {activeProviderTab} Connection
+              </h2>
+              <button onClick={handleCloseAddCloudModal} disabled={cloudFormLoading} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+              {activeProviderTab === 'AWS'
+                ? 'Enter your AWS IAM credentials. Permissions required: ec2:DescribeInstances, ec2:StartInstances, ec2:StopInstances, cloudwatch:GetMetricData.'
+                : 'Enter your GCP Service Account credentials. Permissions required: compute.instances.list, compute.instances.start, compute.instances.stop, monitoring.timeSeries.list.'}
+            </p>
+
+            {cloudFormError && (
+              <div style={{ backgroundColor: 'var(--status-error-bg)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: 'var(--radius-sm)', padding: '0.75rem 1rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.625rem', color: 'var(--status-error)', fontSize: '0.875rem' }}>
+                <AlertCircle size={18} style={{ flexShrink: 0 }} />
+                <span>{cloudFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAddCloudSubmit}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
+                  Connection Name
+                </label>
+                <input type="text" value={cloudConnName} onChange={(e) => setCloudConnName(e.target.value)} placeholder={`e.g. ${activeProviderTab} Production`} required disabled={cloudFormLoading} maxLength={100} />
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
+                  {activeProviderTab === 'AWS' ? 'AWS Account ID / Alias' : 'GCP Project ID'}
+                </label>
+                <input type="text" value={cloudAccountId} onChange={(e) => setCloudAccountId(e.target.value)} placeholder={activeProviderTab === 'AWS' ? '123456789012' : 'my-gcp-project-123'} required disabled={cloudFormLoading} style={{ fontFamily: 'var(--font-mono)' }} />
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
+                  Default Region / Zone
+                </label>
+                <select value={cloudRegion} onChange={(e) => setCloudRegion(e.target.value)} disabled={cloudFormLoading}>
+                  {(activeProviderTab === 'AWS' ? AWS_REGIONS : GCP_REGIONS).map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
+                  {activeProviderTab === 'AWS' ? 'AWS Access Key ID' : 'Service Account Email'}
+                </label>
+                <input type="text" value={cloudAccessKey} onChange={(e) => setCloudAccessKey(e.target.value)} placeholder={activeProviderTab === 'AWS' ? 'AKIAIOSFODNN7EXAMPLE' : 'sa-cloudpulse@my-project.iam.gserviceaccount.com'} required disabled={cloudFormLoading} style={{ fontFamily: 'var(--font-mono)' }} />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem', position: 'relative' }}>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
+                  {activeProviderTab === 'AWS' ? 'AWS Secret Access Key' : 'Service Account Private Key'}
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input type={showCloudSecret ? 'text' : 'password'} value={cloudSecret} onChange={(e) => setCloudSecret(e.target.value)} placeholder="••••••••••••••••••••••••" required disabled={cloudFormLoading} style={{ paddingRight: '2.5rem', fontFamily: 'var(--font-mono)' }} />
+                  <button type="button" onClick={() => setShowCloudSecret(!showCloudSecret)} tabIndex={-1} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0.25rem' }}>
+                    {showCloudSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={handleCloseAddCloudModal} disabled={cloudFormLoading}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={cloudFormLoading}>
+                  {cloudFormLoading ? <span>Encrypting & Saving...</span> : <span>Save {activeProviderTab} Connection</span>}
                 </button>
               </div>
             </form>
@@ -582,27 +846,15 @@ const AzureConnections = () => {
       {/* Disconnect Confirmation Modal */}
       {disconnectingConn && (
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '1rem'
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: '1rem'
         }}>
           <div style={{
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-lg)',
-            width: '100%',
-            maxWidth: '480px',
-            padding: '2rem',
-            boxShadow: 'var(--shadow-lg)'
+            backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: '480px',
+            padding: '2rem', boxShadow: 'var(--shadow-lg)'
           }}>
             <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.75rem' }}>
               Disconnect this Azure subscription from CloudPulse?
@@ -612,29 +864,11 @@ const AzureConnections = () => {
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <button
-                className="btn btn-secondary"
-                onClick={() => setDisconnectingConn(null)}
-                disabled={disconnectLoading}
-              >
+              <button className="btn btn-secondary" onClick={() => setDisconnectingConn(null)} disabled={disconnectLoading}>
                 Cancel
               </button>
-              <button
-                className="btn btn-danger"
-                onClick={handleConfirmDisconnect}
-                disabled={disconnectLoading}
-              >
-                {disconnectLoading ? (
-                  <>
-                    <div className="spinner" style={{ width: '1.25rem', height: '1.25rem', borderWidth: '2px' }}></div>
-                    <span>Disconnecting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 size={16} />
-                    <span>Disconnect Subscription</span>
-                  </>
-                )}
+              <button className="btn btn-danger" onClick={handleConfirmDisconnect} disabled={disconnectLoading}>
+                {disconnectLoading ? <span>Disconnecting...</span> : <span>Disconnect Subscription</span>}
               </button>
             </div>
           </div>

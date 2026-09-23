@@ -118,3 +118,122 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_cache_resource_unique
 ON cost_cache (user_id, connection_id, subscription_id, LOWER(resource_group), LOWER(resource_name))
 WHERE cache_type = 'RESOURCE';
 
+-- Idempotent column migrations for scheduled automation on optimization_policies
+ALTER TABLE optimization_policies
+  ADD COLUMN IF NOT EXISTS scheduled_shutdown_enabled BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS scheduled_shutdown_time VARCHAR(5) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS scheduled_start_enabled BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS scheduled_start_time VARCHAR(5) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS schedule_timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
+  ADD COLUMN IF NOT EXISTS schedule_days VARCHAR(50) NOT NULL DEFAULT '1,2,3,4,5';
+
+-- 7. User Notification Preferences Table (Phase 6B)
+CREATE TABLE IF NOT EXISTS user_notification_preferences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    deallocation_notifications BOOLEAN NOT NULL DEFAULT true,
+    optimization_notifications BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_notification_preferences UNIQUE (user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_notif_prefs_user_id ON user_notification_preferences(user_id);
+
+-- 8. User Safety Exclusion Tags Table (Phase 6B)
+CREATE TABLE IF NOT EXISTS user_exclusion_tags (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tag_key VARCHAR(100) NOT NULL,
+    tag_value VARCHAR(100) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_exclusion_tag UNIQUE (user_id, tag_key, tag_value)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_exclusion_tags_user_id ON user_exclusion_tags(user_id);
+
+-- 9. Budgets Table (Phase 8)
+CREATE TABLE IF NOT EXISTS budgets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subscription_id VARCHAR(64) NOT NULL,
+    resource_group VARCHAR(255),
+    name VARCHAR(100) NOT NULL,
+    monthly_amount NUMERIC(12,2) NOT NULL,
+    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+    warning_threshold_pct NUMERIC(5,2) NOT NULL DEFAULT 80.00,
+    critical_threshold_pct NUMERIC(5,2) NOT NULL DEFAULT 100.00,
+    last_alert_level VARCHAR(20) DEFAULT 'NONE',
+    last_alert_at TIMESTAMPTZ,
+    last_alert_month VARCHAR(7),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_budgets_user_id ON budgets(user_id);
+CREATE INDEX IF NOT EXISTS idx_budgets_user_sub ON budgets(user_id, subscription_id);
+
+-- 10. Cost Anomalies Table (Phase 8)
+CREATE TABLE IF NOT EXISTS cost_anomalies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subscription_id VARCHAR(64) NOT NULL,
+    resource_group VARCHAR(255),
+    resource_name VARCHAR(255),
+    detected_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    actual_cost NUMERIC(12,2) NOT NULL,
+    expected_cost NUMERIC(12,2) NOT NULL,
+    deviation_percentage NUMERIC(6,2) NOT NULL,
+    severity VARCHAR(20) NOT NULL DEFAULT 'MEDIUM' CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED')),
+    reason TEXT,
+    acknowledged_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_anomalies_user_id ON cost_anomalies(user_id);
+CREATE INDEX IF NOT EXISTS idx_cost_anomalies_user_status ON cost_anomalies(user_id, status);
+
+-- 11. Policy Scopes Table (Phase 9)
+CREATE TABLE IF NOT EXISTS policy_scopes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope_type VARCHAR(30) NOT NULL CHECK (scope_type IN ('GLOBAL', 'SUBSCRIPTION', 'RESOURCE_GROUP', 'VM_TAG', 'VM_NAME_PATTERN')),
+    scope_value VARCHAR(255),
+    idle_cpu_threshold NUMERIC(5,2) DEFAULT 5.00,
+    monitoring_window_minutes INTEGER DEFAULT 30,
+    auto_shutdown BOOLEAN DEFAULT false,
+    scheduled_shutdown_enabled BOOLEAN DEFAULT false,
+    scheduled_shutdown_time VARCHAR(5) DEFAULT NULL,
+    scheduled_start_enabled BOOLEAN DEFAULT false,
+    scheduled_start_time VARCHAR(5) DEFAULT NULL,
+    schedule_timezone VARCHAR(50) DEFAULT 'UTC',
+    schedule_days VARCHAR(50) DEFAULT '1,2,3,4,5',
+    priority INTEGER NOT NULL DEFAULT 100,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_scopes_user_id ON policy_scopes(user_id);
+CREATE INDEX IF NOT EXISTS idx_policy_scopes_user_type ON policy_scopes(user_id, scope_type);
+
+-- 12. Multi-Cloud Connections Table (Phase 11)
+CREATE TABLE IF NOT EXISTS cloud_connections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(20) NOT NULL CHECK (provider IN ('AZURE', 'AWS', 'GCP')),
+    connection_name VARCHAR(100) NOT NULL,
+    account_or_subscription_id VARCHAR(100) NOT NULL,
+    tenant_or_region VARCHAR(100),
+    client_or_access_key VARCHAR(100) NOT NULL,
+    encrypted_secret TEXT NOT NULL,
+    iv VARCHAR(32) NOT NULL,
+    auth_tag VARCHAR(32) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DISCONNECTED', 'INVALID_CREDENTIALS', 'DISABLED')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_provider_account UNIQUE (user_id, provider, account_or_subscription_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_connections_user_id ON cloud_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_cloud_connections_user_provider ON cloud_connections(user_id, provider);
