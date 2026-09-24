@@ -353,14 +353,14 @@ async function getResourceRetailEstimate(subscriptionId, resourceGroup, resource
       vmSize,
       region,
       totalCost: estimatedCost,
-      currency: retailRes.currency || 'USD',
+      currency: retailRes.currency || 'INR',
       timeframe: 'MonthToDate',
       source: 'Azure Retail Prices',
       dataFound: true,
       isStale: true,
       isEstimated: true,
       staleReason: 'Azure Cost Management is temporarily throttled. Showing an estimated cost based on Azure retail pricing.',
-      reason: `Actual Azure Cost Management data is temporarily throttled. Showing an estimated month-to-date cost (${Math.round(hoursElapsed)} hours @ $${retailRes.hourlyPrice}/hr) based on Azure retail pricing.`,
+      reason: `Actual Azure Cost Management data is temporarily throttled. Showing an estimated month-to-date cost (${Math.round(hoursElapsed)} hours @ ₹${retailRes.hourlyPrice}/hr) based on Azure retail pricing.`,
       cachedAt: new Date().toISOString()
     };
   } catch (err) {
@@ -444,7 +444,7 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
         const result = await costClient.query.usage(scope, queryParameters);
 
         let totalCost = 0;
-        let currency = 'USD';
+        let currency = 'INR';
         let dataFound = false;
 
         const targetRgLower = resourceGroup.toLowerCase();
@@ -457,7 +457,7 @@ async function fetchResourceMonthToDateCost(subscriptionId, resourceGroup, resou
           const rgIdx = result.columns.findIndex(c => c.name === 'ResourceGroupName');
 
           for (const row of result.rows) {
-            const rowCurrency = (currencyIdx !== -1 && row[currencyIdx]) ? row[currencyIdx] : 'USD';
+            const rowCurrency = (currencyIdx !== -1 && row[currencyIdx]) ? row[currencyIdx] : 'INR';
             if (rowCurrency) currency = rowCurrency;
 
             const rowResourceId = (resourceIdIdx !== -1 && row[resourceIdIdx]) ? String(row[resourceIdIdx]) : '';
@@ -616,7 +616,7 @@ async function fetchVmRetailPrice(vmSize, region) {
         vmSize,
         region,
         hourlyPrice: hourlyPrice !== undefined ? hourlyPrice : null,
-        currency: item.currencyCode || 'USD',
+        currency: item.currencyCode || 'INR',
         priceUnit: item.unitOfMeasure || '1 Hour',
         source: 'Azure Retail Prices API',
         dataFound: true,
@@ -677,7 +677,7 @@ async function calculateVmPotentialSavings(subscriptionId, resourceGroup, vmName
 
   const priceResult = await fetchVmRetailPrice(vmSize, region);
   const hourlyPrice = priceResult.dataFound ? priceResult.hourlyPrice : null;
-  const currency = priceResult.currency || 'USD';
+  const currency = priceResult.currency || 'INR';
   let powerState = 'unknown';
   try {
     const instanceView = await computeClient.virtualMachines.instanceView(resourceGroup, vmName);

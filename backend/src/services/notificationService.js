@@ -208,7 +208,7 @@ async function sendDeallocationNotification(actionRecord) {
 /**
  * Sends a budget threshold alert notification via Gmail API.
  */
-async function sendBudgetAlertNotification({ recipientEmail, budgetName, subscriptionId, resourceGroup, currentSpend, budgetLimit, thresholdPct, currency = 'USD' }) {
+async function sendBudgetAlertNotification({ recipientEmail, budgetName, subscriptionId, resourceGroup, currentSpend, budgetLimit, thresholdPct, currency = 'INR' }) {
   if (!recipientEmail) return { success: false, reason: 'NO_RECIPIENT' };
 
   const senderEmail = (process.env.GMAIL_SENDER_EMAIL || 'cloudpulse.project@gmail.com').replace(/["'\s]/g, '');
@@ -225,8 +225,8 @@ async function sendBudgetAlertNotification({ recipientEmail, budgetName, subscri
     `Budget Name: ${budgetName}`,
     `Subscription: ${subscriptionId}`,
     resourceGroup ? `Resource Group: ${resourceGroup}` : '',
-    `Current Month Spend: ${currency} ${currentSpend}`,
-    `Configured Budget Limit: ${currency} ${budgetLimit}`,
+    `Current Month Spend: ₹${currentSpend} (${currency})`,
+    `Configured Budget Limit: ₹${budgetLimit} (${currency})`,
     `Threshold Crossed: ${thresholdPct}%`,
     `Timestamp: ${new Date().toUTCString()}`,
     `========================================`
@@ -240,8 +240,8 @@ async function sendBudgetAlertNotification({ recipientEmail, budgetName, subscri
         <p style="margin: 6px 0;"><strong>Budget:</strong> ${budgetName}</p>
         <p style="margin: 6px 0;"><strong>Subscription:</strong> ${subscriptionId}</p>
         ${resourceGroup ? `<p style="margin: 6px 0;"><strong>Resource Group:</strong> ${resourceGroup}</p>` : ''}
-        <p style="margin: 6px 0;"><strong>Current Spend:</strong> ${currency} ${currentSpend}</p>
-        <p style="margin: 6px 0;"><strong>Budget Limit:</strong> ${currency} ${budgetLimit}</p>
+        <p style="margin: 6px 0;"><strong>Current Spend:</strong> ₹${currentSpend} (${currency})</p>
+        <p style="margin: 6px 0;"><strong>Budget Limit:</strong> ₹${budgetLimit} (${currency})</p>
         <p style="margin: 6px 0; color: #e11d48; font-weight: bold;"><strong>Threshold Crossed:</strong> ${thresholdPct}%</p>
       </div>
       <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">Sent automatically by CloudPulse Cloud Governance Platform.</p>

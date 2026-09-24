@@ -7,7 +7,7 @@ import { budgetService } from '../services/budgetService';
 import { anomalyService } from '../services/anomalyService';
 import { Link } from 'react-router-dom';
 import {
-  DollarSign,
+  IndianRupee,
   Cloud,
   RefreshCw,
   Search,
@@ -28,28 +28,24 @@ import {
   X
 } from 'lucide-react';
 
-const formatCurrency = (amount, currencyCode = 'USD') => {
+const formatCurrency = (amount, currencyCode = 'INR') => {
   const num = Number(amount || 0);
-  const formattedNum = num.toLocaleString(undefined, {
+  const formattedNum = num.toLocaleString('en-IN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
 
-  const code = (currencyCode || 'USD').toUpperCase().trim();
+  const code = (currencyCode || 'INR').toUpperCase().trim();
   const currencySymbols = {
-    USD: '$',
+    USD: '₹',
     INR: '₹',
     EUR: '€',
     GBP: '£',
     JPY: '¥'
   };
 
-  const symbol = currencySymbols[code];
-  if (symbol) {
-    return `${symbol}${formattedNum}`;
-  }
-
-  return `${code} ${formattedNum}`;
+  const symbol = currencySymbols[code] || '₹';
+  return `${symbol}${formattedNum}`;
 };
 
 const CostOverview = () => {
@@ -81,7 +77,7 @@ const CostOverview = () => {
     monthlyAmount: '',
     warningThresholdPct: 80,
     criticalThresholdPct: 100,
-    currency: 'USD'
+    currency: 'INR'
   });
   const [creatingBudget, setCreatingBudget] = useState(false);
   const [budgetError, setBudgetError] = useState('');
@@ -111,7 +107,7 @@ const CostOverview = () => {
         subscriptionId: newBudget.subscriptionId || activeConn?.subscription_id || 'default-sub'
       });
       setShowCreateBudgetModal(false);
-      setNewBudget({ name: '', subscriptionId: '', resourceGroup: '', monthlyAmount: '', warningThresholdPct: 80, criticalThresholdPct: 100, currency: 'USD' });
+      setNewBudget({ name: '', subscriptionId: '', resourceGroup: '', monthlyAmount: '', warningThresholdPct: 80, criticalThresholdPct: 100, currency: 'INR' });
       await fetchBudgets();
     } catch (err) {
       setBudgetError(err.response?.data?.message || err.message || 'Failed to create budget');
@@ -385,7 +381,7 @@ const CostOverview = () => {
           <div className="card">
             <div className="card-header">
               <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Month-to-Date Spend</span>
-              <div style={{ color: 'var(--status-success)' }}><DollarSign size={22} /></div>
+              <div style={{ color: 'var(--status-success)' }}><IndianRupee size={22} /></div>
             </div>
 
             {mtdCost.loading ? (
@@ -405,7 +401,7 @@ const CostOverview = () => {
                     mtdCost.data?.currency
                   )}{' '}
                   <span style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-secondary)' }}>
-                    {mtdCost.data?.currency || 'USD'}
+                    {mtdCost.data?.currency || 'INR'}
                   </span>
                 </div>
 
@@ -609,7 +605,7 @@ const CostOverview = () => {
               <div style={{ fontSize: '2rem', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
                 {formatCurrency(lookupResult.data.totalCost, lookupResult.data.currency)}{' '}
                 <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                  {lookupResult.data.currency || 'USD'}
+                  {lookupResult.data.currency || 'INR'}
                 </span>
               </div>
 
@@ -865,7 +861,7 @@ const CostOverview = () => {
 
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '0.25rem' }}>
-                  Monthly Limit Amount ($)
+                  Monthly Limit Amount (₹)
                 </label>
                 <input
                   type="number"

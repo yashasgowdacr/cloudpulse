@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS cost_cache (
     resource_group VARCHAR(255),
     resource_name VARCHAR(255),
     total_cost NUMERIC(12,2) NOT NULL DEFAULT 0.00,
-    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+    currency VARCHAR(10) NOT NULL DEFAULT 'INR',
     cached_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS budgets (
     resource_group VARCHAR(255),
     name VARCHAR(100) NOT NULL,
     monthly_amount NUMERIC(12,2) NOT NULL,
-    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+    currency VARCHAR(10) NOT NULL DEFAULT 'INR',
     warning_threshold_pct NUMERIC(5,2) NOT NULL DEFAULT 80.00,
     critical_threshold_pct NUMERIC(5,2) NOT NULL DEFAULT 100.00,
     last_alert_level VARCHAR(20) DEFAULT 'NONE',

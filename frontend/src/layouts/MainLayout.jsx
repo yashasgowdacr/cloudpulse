@@ -6,7 +6,7 @@ import {
   LayoutDashboard,
   Cloud,
   Server,
-  DollarSign,
+  IndianRupee,
   TrendingDown,
   Sliders,
   History,
@@ -40,7 +40,7 @@ const MainLayout = () => {
     {
       section: 'Cost',
       items: [
-        { label: 'Cost Overview', path: '/costs', icon: DollarSign },
+        { label: 'Cost Overview', path: '/costs', icon: IndianRupee },
         { label: 'Savings', path: '/savings', icon: TrendingDown }
       ]
     },

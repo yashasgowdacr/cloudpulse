@@ -62,7 +62,7 @@ async function createBudget(userId, data) {
     data.resourceGroup ? data.resourceGroup.trim() : null,
     data.name.trim(),
     parseFloat(data.monthlyAmount),
-    data.currency ? data.currency.trim().toUpperCase() : 'USD',
+    data.currency ? data.currency.trim().toUpperCase() : 'INR',
     data.warningThresholdPct ? parseFloat(data.warningThresholdPct) : 80.00,
     data.criticalThresholdPct ? parseFloat(data.criticalThresholdPct) : 100.00
   ];
@@ -169,7 +169,7 @@ async function updateBudget(userId, budgetId, updates) {
     merged.subscription_id.trim(),
     merged.resource_group ? merged.resource_group.trim() : null,
     parseFloat(merged.monthly_amount),
-    merged.currency ? merged.currency.trim().toUpperCase() : 'USD',
+    merged.currency ? merged.currency.trim().toUpperCase() : 'INR',
     parseFloat(merged.warning_threshold_pct),
     parseFloat(merged.critical_threshold_pct)
   ];

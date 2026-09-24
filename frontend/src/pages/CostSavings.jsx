@@ -8,7 +8,7 @@ import {
   Cloud,
   RefreshCw,
   Server,
-  DollarSign,
+  IndianRupee,
   Activity,
   AlertCircle,
   CheckCircle2,

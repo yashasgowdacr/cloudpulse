@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Sliders,
   Activity,
-  DollarSign,
+  IndianRupee,
   TrendingDown,
   ShieldCheck,
   AlertCircle,
@@ -691,7 +691,7 @@ const VirtualMachines = () => {
               {/* Price Information */}
               <div className="card" style={{ padding: '1rem' }}>
                 <div style={{ fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <DollarSign size={16} style={{ color: 'var(--status-success)' }} />
+                  <IndianRupee size={16} style={{ color: 'var(--status-success)' }} />
                   <span>Azure Retail Price</span>
                 </div>
 

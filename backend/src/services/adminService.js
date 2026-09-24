@@ -71,7 +71,7 @@ async function getPlatformMetrics() {
     totalOptimizationActions: totalActions,
     successfulDeallocations,
     totalEstimatedAvoidedCost,
-    currency: 'USD'
+    currency: 'INR'
   };
 }
 

@@ -41,7 +41,7 @@ async function detectAnomaliesForUser(userId) {
         severity = 'HIGH';
       }
 
-      const reason = `Unusual cost increase detected: Current cost of ${entry.currency || 'USD'} ${actual} is ${deviationPct}% above the baseline expected cost of ${entry.currency || 'USD'} ${expected}.`;
+      const reason = `Unusual cost increase detected: Current cost of ₹${actual} is ${deviationPct}% above the baseline expected cost of ₹${expected} (${entry.currency || 'INR'}).`;
 
       // Check if already recorded for today to prevent duplicates
       const existingRes = await db.query(

@@ -33,7 +33,7 @@ async function getDashboardKpiMetrics(userId, connectionId = null, filters = {})
   const connections = connRes.rows;
 
   let actualMonthToDateCost = 0;
-  let currency = 'USD';
+  let currency = 'INR';
   let hasActualCostData = false;
 
   // 2. Fetch or retrieve cached MTD Cost
@@ -218,7 +218,7 @@ async function getCostTrends(userId, connectionId = null, filters = {}) {
     dailyTrends.push({
       date: dayStr,
       cost: Math.round(baseDaily * variance * 100) / 100,
-      currency: rows[0]?.currency || 'USD'
+      currency: rows[0]?.currency || 'INR'
     });
   }
 

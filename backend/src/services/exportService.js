@@ -212,7 +212,7 @@ async function exportCostData(userId, connectionId = null, format = 'csv') {
     resourceGroup: r.resource_group || 'All',
     resourceName: r.resource_name || 'All',
     totalCost: parseFloat(r.total_cost).toFixed(2),
-    currency: r.currency || 'USD',
+    currency: r.currency || 'INR',
     cachedAt: new Date(r.cached_at).toISOString()
   }));
 

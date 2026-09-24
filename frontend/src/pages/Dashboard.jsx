@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import {
   Cloud,
   Server,
-  DollarSign,
+  IndianRupee,
   TrendingDown,
   ShieldCheck,
   Play,
@@ -30,20 +30,20 @@ const safeErrString = (errVal, fallback = 'Error loading data') => {
   return String(errVal);
 };
 
-const formatCurrency = (amount, currencyCode = 'USD') => {
-  if (amount === undefined || amount === null || isNaN(amount)) return '$0.00';
+const formatCurrency = (amount, currencyCode = 'INR') => {
+  if (amount === undefined || amount === null || isNaN(amount)) return '₹0.00';
   const validCode = (currencyCode && typeof currencyCode === 'string' && currencyCode.length === 3)
     ? currencyCode.toUpperCase()
-    : 'USD';
+    : 'INR';
   try {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
-      currency: validCode,
+      currency: validCode === 'USD' ? 'INR' : validCode,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(amount);
   } catch (err) {
-    return `$${Number(amount).toFixed(2)}`;
+    return `₹${Number(amount).toFixed(2)}`;
   }
 };
 
@@ -146,7 +146,7 @@ const Dashboard = () => {
     estimatedProjectedCost: 0,
     potentialMonthlySavings: 0,
     estimatedAvoidedCost: 0,
-    currency: 'USD',
+    currency: 'INR',
     activeVmCount: 0,
     idleVmCount: 0,
     protectedVmCount: 0,
@@ -447,7 +447,7 @@ const Dashboard = () => {
         <div className="card">
           <div className="card-header" style={{ marginBottom: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <DollarSign size={20} style={{ color: 'var(--status-warning)' }} />
+              <IndianRupee size={20} style={{ color: 'var(--status-warning)' }} />
               <span className="card-title">Cost by Resource Group</span>
             </div>
             <Link to="/costs" style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', textDecoration: 'none' }}>

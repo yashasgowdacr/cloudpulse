@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ShieldCheck, Zap, DollarSign, Cloud, ArrowRight } from 'lucide-react';
+import { Activity, ShieldCheck, Zap, IndianRupee, Cloud, ArrowRight } from 'lucide-react';
 
 const Home = () => {
   return (
@@ -88,7 +88,7 @@ const Home = () => {
 
           <div className="card">
             <div style={{ color: 'var(--status-success)', marginBottom: '1rem' }}>
-              <DollarSign size={32} />
+              <IndianRupee size={32} />
             </div>
             <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.5rem' }}>Real-Time Savings Calculation</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>

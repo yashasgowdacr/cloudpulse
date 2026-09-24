@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   ShieldCheck, Play, Send, CheckCircle2, AlertCircle,
-  Users, Activity, DollarSign, Server, Search, RefreshCw,
+  Users, Activity, IndianRupee, Server, Search, RefreshCw,
   Eye, UserX, UserCheck, X
 } from 'lucide-react';
 import api from '../services/api';
@@ -224,10 +224,10 @@ const AdminPanel = () => {
         <div className="card" style={{ borderColor: 'rgba(16, 185, 129, 0.3)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--status-success)', textTransform: 'uppercase' }}>ESTIMATED AVOIDED COST</span>
-            <DollarSign size={18} style={{ color: 'var(--status-success)' }} />
+            <IndianRupee size={18} style={{ color: 'var(--status-success)' }} />
           </div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--status-success)' }}>
-            ${metricsLoading ? '...' : (metrics?.totalEstimatedAvoidedCost?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '0.00')}
+            ₹{metricsLoading ? '...' : (metrics?.totalEstimatedAvoidedCost?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '0.00')}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
             Derived from VM runtime deallocations
@@ -482,7 +482,7 @@ const AdminPanel = () => {
               <div>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Avoided Cost</span>
                 <div style={{ fontWeight: 600, color: 'var(--status-success)' }}>
-                  ${selectedTenant.estimatedAvoidedCost?.toFixed(2)}
+                  ₹{selectedTenant.estimatedAvoidedCost?.toFixed(2)}
                 </div>
               </div>
             </div>
