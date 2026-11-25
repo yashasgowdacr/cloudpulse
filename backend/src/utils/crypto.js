@@ -16,6 +16,9 @@ function getEncryptionKey() {
   if (trimmedKey.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(trimmedKey)) {
     throw new Error('FATAL CONFIGURATION ERROR: ENCRYPTION_KEY must be exactly 64 hexadecimal characters (32 bytes).');
   }
+  if (/^0{64}$/.test(trimmedKey)) {
+    throw new Error('FATAL CONFIGURATION ERROR: ENCRYPTION_KEY must not use the documented placeholder value.');
+  }
 
   return Buffer.from(trimmedKey, 'hex');
 }

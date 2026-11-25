@@ -9,6 +9,12 @@ const inFlightRequests = new Map();
 const throttleState = new Map();
 const COST_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes fresh cache TTL
 const CIRCUIT_BREAKER_TTL_MS = 5 * 60 * 1000; // 5 minutes circuit-breaker cooldown
+const MAX_STALE_COST_CACHE_MS = 24 * 60 * 60 * 1000; // Never present cost data older than one day
+
+function isUsablePersistentSnapshot(cachedAt) {
+  const timestamp = new Date(cachedAt).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= MAX_STALE_COST_CACHE_MS;
+}
 
 /**
  * Checks if the circuit breaker is currently open (throttled) for the context.
@@ -52,7 +58,7 @@ function clearCircuitBreaker(userId, connectionId, subscriptionId) {
 /**
  * Helper to execute Azure Cost Management API queries with exponential backoff retries on HTTP 429.
  */
-async function executeAzureCostQueryWithRetry(fn, maxRetries = 3) {
+async function executeAzureCostQueryWithRetry(fn, maxRetries = 1) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
@@ -133,6 +139,7 @@ async function getPersistentCostCache({ userId, connectionId, subscriptionId, ca
       );
       if (res.rows.length > 0) {
         const row = res.rows[0];
+        if (!isUsablePersistentSnapshot(row.cached_at)) return null;
         return {
           totalCost: parseFloat(row.total_cost),
           currency: row.currency,
@@ -152,6 +159,7 @@ async function getPersistentCostCache({ userId, connectionId, subscriptionId, ca
       );
       if (res.rows.length > 0) {
         const row = res.rows[0];
+        if (!isUsablePersistentSnapshot(row.cached_at)) return null;
         return {
           resourceName,
           resourceGroup,

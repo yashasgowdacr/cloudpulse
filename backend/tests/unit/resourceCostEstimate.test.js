@@ -28,7 +28,7 @@ describe('Resource Cost Retail Estimate & Precedence Unit Tests', () => {
       resource_name: VM_NAME,
       total_cost: 84.50,
       currency: 'USD',
-      cached_at: new Date('2026-09-20T10:00:00.000Z')
+      cached_at: new Date().toISOString()
     };
 
     db.query.mockResolvedValueOnce({ rows: [mockDbSnapshot] });

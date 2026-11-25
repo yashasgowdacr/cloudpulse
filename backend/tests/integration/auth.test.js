@@ -249,7 +249,7 @@ describe('Authentication & RBAC Integration Tests', () => {
           ]
         })
         // 3. UPDATE refresh_tokens (revoke old)
-        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: 'rt-1' }] })
         // 4. INSERT into refresh_tokens (new token)
         .mockResolvedValueOnce({ rows: [] });
 

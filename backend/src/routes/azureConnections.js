@@ -3,6 +3,7 @@ const { ClientSecretCredential } = require('@azure/identity');
 const { ComputeManagementClient } = require('@azure/arm-compute');
 const db = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { connectionValidationLimiter } = require('../middleware/rateLimit');
 const { encryptSecret } = require('../utils/crypto');
 
 const router = express.Router();
@@ -105,7 +106,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
  * POST /api/azure-connections
  * Create an authenticated user's Azure Service Principal connection.
  */
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, connectionValidationLimiter, async (req, res) => {
   try {
     // Derive user_id strictly from req.user.id (never accept user_id from body)
     const userId = req.user.id;
@@ -167,13 +168,8 @@ router.post('/', authenticateToken, async (req, res) => {
       const vmIterator = computeClient.virtualMachines.listAll();
       await vmIterator.next();
     } catch (azureErr) {
-      // Sanitize Azure error (never log or leak credentials/secrets)
-      const rawMsg = azureErr.message ? azureErr.message.split('\n')[0] : 'Azure authentication failed';
-      const sanitizedDetails = rawMsg.replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***');
-
       return res.status(400).json({
-        error: 'Azure authentication or subscription access failed. Please verify your Tenant ID, Subscription ID, Client ID, Client Secret, and subscription permissions.',
-        details: sanitizedDetails
+        error: 'Azure authentication or subscription access failed. Please verify the supplied credentials and subscription permissions.'
       });
     }
 

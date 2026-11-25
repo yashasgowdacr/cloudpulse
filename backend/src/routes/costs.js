@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { cloudReadLimiter } = require('../middleware/rateLimit');
 const { getAzureCredentialForUser } = require('../services/azureConnectionResolver');
 const { parseQueryOptions } = require('../services/azureVmService');
 const {
@@ -15,7 +16,7 @@ const router = express.Router();
  * GET /api/cost/month-to-date
  * Retrieves month-to-date accumulated cost for the active Azure subscription.
  */
-router.get('/month-to-date', authenticateToken, async (req, res) => {
+router.get('/month-to-date', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
 
   try {
@@ -92,7 +93,7 @@ router.get('/month-to-date', authenticateToken, async (req, res) => {
  * GET /api/cost/resource/:resourceGroup/:resourceName
  * Retrieves month-to-date cost breakdown for a specific Azure resource.
  */
-router.get('/resource/:resourceGroup/:resourceName', authenticateToken, async (req, res) => {
+router.get('/resource/:resourceGroup/:resourceName', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, resourceName } = req.params;
 
@@ -172,7 +173,7 @@ router.get('/resource/:resourceGroup/:resourceName', authenticateToken, async (r
  * GET /api/cost/vm-price/:resourceGroup/:vmName
  * Retrieves hourly price details for a virtual machine size and region via Azure Retail Prices.
  */
-router.get('/vm-price/:resourceGroup/:vmName', authenticateToken, async (req, res) => {
+router.get('/vm-price/:resourceGroup/:vmName', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
 
@@ -235,7 +236,7 @@ router.get('/vm-price/:resourceGroup/:vmName', authenticateToken, async (req, re
  * GET /api/cost/savings/:resourceGroup/:vmName
  * Calculates potential compute savings for an idle virtual machine based on retail rates.
  */
-router.get('/savings/:resourceGroup/:vmName', authenticateToken, async (req, res) => {
+router.get('/savings/:resourceGroup/:vmName', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const options = parseQueryOptions(req.query);

@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { cloudReadLimiter, connectionValidationLimiter } = require('../middleware/rateLimit');
 const {
   createCloudConnection,
   getCloudConnections,
@@ -40,7 +41,7 @@ router.get('/connections', authenticateToken, async (req, res) => {
  * POST /api/cloud/connections
  * Creates a new cloud connection with encrypted credentials.
  */
-router.post('/connections', authenticateToken, async (req, res) => {
+router.post('/connections', authenticateToken, connectionValidationLimiter, async (req, res) => {
   try {
     const connection = await createCloudConnection(req.user.id, req.body);
     return res.status(201).json({
@@ -51,7 +52,7 @@ router.post('/connections', authenticateToken, async (req, res) => {
     console.error('[CLOUD-CONNECTIONS] Error creating connection:', error.message);
     return res.status(error.statusCode || 500).json({
       error: 'CREATE_CLOUD_CONNECTION_FAILED',
-      message: error.message
+      message: 'Unable to create the cloud connection.'
     });
   }
 });
@@ -79,7 +80,7 @@ router.delete('/connections/:id', authenticateToken, async (req, res) => {
  * GET /api/cloud/vms
  * Discovers unified virtual machines across all connected cloud providers.
  */
-router.get('/vms', authenticateToken, async (req, res) => {
+router.get('/vms', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
   try {
     const vms = await discoverUnifiedVms(req.user.id, connectionId);
@@ -91,7 +92,7 @@ router.get('/vms', authenticateToken, async (req, res) => {
     console.error('[CLOUD-VMS] Error discovering unified VMs:', error.message);
     return res.status(500).json({
       error: 'DISCOVER_UNIFIED_VMS_FAILED',
-      message: error.message
+      message: 'Unable to discover cloud virtual machines.'
     });
   }
 });

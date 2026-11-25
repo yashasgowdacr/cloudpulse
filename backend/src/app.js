@@ -33,15 +33,21 @@ try {
   }
 }
 
-// Auto-run database schema migrations idempotently on startup
-runMigrations().catch((migErr) => {
-  console.error('[STARTUP-MIGRATION-ERROR] Failed to run schema migrations:', migErr.message);
-});
+// Auto-run database schema migrations idempotently on startup. Test imports must
+// stay side-effect free; migrations are exercised explicitly in deployment jobs.
+if (process.env.RUN_MIGRATIONS !== 'false') {
+  runMigrations().catch((migErr) => {
+    console.error('[STARTUP-MIGRATION-ERROR] Failed to run schema migrations:', migErr.message);
+  });
+}
 
 const app = express();
 
-// Trust reverse proxy (Render, Vercel, Nginx) for rate-limiting & client IP detection
-app.set('trust proxy', 1);
+// Do not trust client-provided forwarding headers unless the deployment's proxy
+// range is explicitly configured. A numeric value here lets direct callers spoof
+// their address and bypass IP based controls.
+const trustedProxy = process.env.TRUST_PROXY && process.env.TRUST_PROXY.trim();
+app.set('trust proxy', trustedProxy || false);
 
 app.use(helmet());
 app.use(cookieParser());
@@ -49,7 +55,7 @@ app.use(requestLoggerMiddleware);
 
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: {

@@ -1,6 +1,7 @@
 const express = require('express');
 const { DefaultAzureCredential } = require('@azure/identity');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireRole } = require('../middleware/auth');
+const { cloudReadLimiter, cloudMutationLimiter } = require('../middleware/rateLimit');
 const { getAzureCredentialForUser } = require('../services/azureConnectionResolver');
 const {
   discoverAzureVms,
@@ -20,13 +21,13 @@ const router = express.Router();
  * GET /azure/health
  * Verifies Azure credential and subscription connectivity.
  */
-router.get('/health', async (req, res) => {
+router.get('/health', authenticateToken, requireRole('ADMIN'), async (req, res) => {
   const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
 
   if (!subscriptionId) {
     return res.status(500).json({
       status: 'DOWN',
-      message: 'AZURE_SUBSCRIPTION_ID is missing in environment variables'
+      message: 'Azure health check is not configured.'
     });
   }
 
@@ -49,7 +50,7 @@ router.get('/health', async (req, res) => {
     return res.status(500).json({
       status: 'DOWN',
       message: 'Azure authentication failed',
-      error: error.message
+      error: 'Azure health check failed.'
     });
   }
 });
@@ -58,7 +59,7 @@ router.get('/health', async (req, res) => {
  * GET /azure/vms
  * Discovers virtual machines across resource groups in the resolved Azure subscription.
  */
-router.get('/vms', authenticateToken, async (req, res) => {
+router.get('/vms', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
 
   try {
@@ -114,11 +115,9 @@ router.get('/vms', authenticateToken, async (req, res) => {
       });
     }
 
-    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to discover virtual machines';
-
     return res.status(500).json({
       error: 'VM_DISCOVERY_FAILURE',
-      message: `Failed to discover virtual machines: ${sanitizedMsg}`
+      message: 'Failed to discover virtual machines.'
     });
   }
 });
@@ -127,7 +126,7 @@ router.get('/vms', authenticateToken, async (req, res) => {
  * GET /azure/vms/:resourceGroup/:vmName/metrics
  * Queries Azure Monitor for Percentage CPU metrics for a specific VM.
  */
-router.get('/vms/:resourceGroup/:vmName/metrics', authenticateToken, async (req, res) => {
+router.get('/vms/:resourceGroup/:vmName/metrics', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const { timespan } = parseQueryOptions(req.query);
@@ -174,11 +173,9 @@ router.get('/vms/:resourceGroup/:vmName/metrics', authenticateToken, async (req,
       });
     }
 
-    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to query CPU metrics';
-
     return res.status(500).json({
       error: 'METRICS_QUERY_FAILURE',
-      message: `Failed to query metrics for VM '${vmName}' in resource group '${resourceGroup}': ${sanitizedMsg}`
+      message: 'Failed to query virtual machine metrics.'
     });
   }
 });
@@ -187,7 +184,7 @@ router.get('/vms/:resourceGroup/:vmName/metrics', authenticateToken, async (req,
  * GET /azure/vms/:resourceGroup/:vmName/idle
  * Evaluates whether a virtual machine is idle based on CPU metrics.
  */
-router.get('/vms/:resourceGroup/:vmName/idle', authenticateToken, async (req, res) => {
+router.get('/vms/:resourceGroup/:vmName/idle', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const { windowMinutes, threshold } = parseQueryOptions(req.query);
@@ -228,11 +225,9 @@ router.get('/vms/:resourceGroup/:vmName/idle', authenticateToken, async (req, re
       });
     }
 
-    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to evaluate idle status';
-
     return res.status(500).json({
-      error: `Failed to evaluate idle status for VM '${vmName}' in resource group '${resourceGroup}'`,
-      details: sanitizedMsg
+      error: 'IDLE_EVALUATION_FAILURE',
+      message: 'Failed to evaluate idle status.'
     });
   }
 });
@@ -241,7 +236,7 @@ router.get('/vms/:resourceGroup/:vmName/idle', authenticateToken, async (req, re
  * GET /azure/vms/:resourceGroup/:vmName/policy
  * Evaluates shutdown policy eligibility for a virtual machine.
  */
-router.get('/vms/:resourceGroup/:vmName/policy', authenticateToken, async (req, res) => {
+router.get('/vms/:resourceGroup/:vmName/policy', authenticateToken, cloudReadLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const { windowMinutes, threshold, environment, autoShutdown } = parseQueryOptions(req.query);
@@ -283,11 +278,9 @@ router.get('/vms/:resourceGroup/:vmName/policy', authenticateToken, async (req, 
       });
     }
 
-    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to evaluate policy';
-
     return res.status(500).json({
-      error: `Failed to evaluate policy for VM '${vmName}' in resource group '${resourceGroup}'`,
-      details: sanitizedMsg
+      error: 'POLICY_EVALUATION_FAILURE',
+      message: 'Failed to evaluate shutdown policy.'
     });
   }
 });
@@ -296,7 +289,7 @@ router.get('/vms/:resourceGroup/:vmName/policy', authenticateToken, async (req, 
  * POST /azure/vms/:resourceGroup/:vmName/shutdown
  * Requests deallocation/shutdown of an idle virtual machine.
  */
-router.post('/vms/:resourceGroup/:vmName/shutdown', authenticateToken, async (req, res) => {
+router.post('/vms/:resourceGroup/:vmName/shutdown', authenticateToken, cloudMutationLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
   const options = parseQueryOptions({ ...req.query, ...req.body });
@@ -334,11 +327,9 @@ router.post('/vms/:resourceGroup/:vmName/shutdown', authenticateToken, async (re
       });
     }
 
-    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to execute shutdown';
-
     return res.status(500).json({
-      error: `Failed to execute shutdown for VM '${vmName}' in resource group '${resourceGroup}'`,
-      details: sanitizedMsg
+      error: 'VM_SHUTDOWN_FAILURE',
+      message: 'Failed to execute virtual machine shutdown.'
     });
   }
 });
@@ -347,7 +338,7 @@ router.post('/vms/:resourceGroup/:vmName/shutdown', authenticateToken, async (re
  * POST /azure/vms/:resourceGroup/:vmName/start
  * Starts a stopped/deallocated virtual machine.
  */
-router.post('/vms/:resourceGroup/:vmName/start', authenticateToken, async (req, res) => {
+router.post('/vms/:resourceGroup/:vmName/start', authenticateToken, cloudMutationLimiter, async (req, res) => {
   const { connectionId } = req.query;
   const { resourceGroup, vmName } = req.params;
 
@@ -392,11 +383,9 @@ router.post('/vms/:resourceGroup/:vmName/start', authenticateToken, async (req, 
       });
     }
 
-    const sanitizedMsg = error.message ? error.message.split('\n')[0].replace(/clientSecret=[^&\s]+/gi, 'clientSecret=***') : 'Failed to start VM';
-
     return res.status(500).json({
-      error: `Failed to start VM '${vmName}' in resource group '${resourceGroup}'`,
-      message: sanitizedMsg
+      error: 'VM_START_FAILURE',
+      message: 'Failed to start virtual machine.'
     });
   }
 });
@@ -405,8 +394,12 @@ router.post('/vms/:resourceGroup/:vmName/start', authenticateToken, async (req, 
  * POST /azure/vms/bulk/deallocate
  * Bulk deallocates a list of virtual machines with per-VM safety evaluation and controlled concurrency.
  */
-router.post('/vms/bulk/deallocate', authenticateToken, async (req, res) => {
+router.post('/vms/bulk/deallocate', authenticateToken, cloudMutationLimiter, async (req, res) => {
   const { connectionId, vms } = req.body;
+
+  if (!Array.isArray(vms) || vms.length === 0 || vms.length > 25) {
+    return res.status(400).json({ error: 'VM_BATCH_INVALID', message: 'Provide between 1 and 25 virtual machines.' });
+  }
 
   try {
     const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
@@ -427,7 +420,7 @@ router.post('/vms/bulk/deallocate', authenticateToken, async (req, res) => {
     console.error('[BULK-DEALLOCATE] Error in bulk deallocation:', error.message);
     return res.status(error.statusCode || 500).json({
       error: 'BULK_DEALLOCATE_FAILED',
-      message: error.message
+      message: 'Failed to deallocate the requested virtual machines.'
     });
   }
 });
@@ -436,8 +429,12 @@ router.post('/vms/bulk/deallocate', authenticateToken, async (req, res) => {
  * POST /azure/vms/bulk/start
  * Bulk starts a list of virtual machines with per-VM handling and controlled concurrency.
  */
-router.post('/vms/bulk/start', authenticateToken, async (req, res) => {
+router.post('/vms/bulk/start', authenticateToken, cloudMutationLimiter, async (req, res) => {
   const { connectionId, vms } = req.body;
+
+  if (!Array.isArray(vms) || vms.length === 0 || vms.length > 25) {
+    return res.status(400).json({ error: 'VM_BATCH_INVALID', message: 'Provide between 1 and 25 virtual machines.' });
+  }
 
   try {
     const resolved = await getAzureCredentialForUser(req.user.id, connectionId);
@@ -458,7 +455,7 @@ router.post('/vms/bulk/start', authenticateToken, async (req, res) => {
     console.error('[BULK-START] Error in bulk start:', error.message);
     return res.status(error.statusCode || 500).json({
       error: 'BULK_START_FAILED',
-      message: error.message
+      message: 'Failed to start the requested virtual machines.'
     });
   }
 });

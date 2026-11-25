@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { cloudMutationLimiter } = require('../middleware/rateLimit');
 const { runScheduledOptimization, runManualOptimizationForUser } = require('../services/schedulerService');
 const { sendNotification } = require('../services/notificationService');
 
@@ -9,7 +10,7 @@ const router = express.Router();
  * POST /api/optimization/run-now
  * Triggers an immediate optimization scan across all active Azure connections for the authenticated tenant.
  */
-router.post('/optimization/run-now', authenticateToken, async (req, res) => {
+router.post('/optimization/run-now', authenticateToken, cloudMutationLimiter, async (req, res) => {
   try {
     const result = await runManualOptimizationForUser(req.user.id);
     return res.json(result);
@@ -32,7 +33,7 @@ router.post('/optimization/run-now', authenticateToken, async (req, res) => {
  * GET /api/scheduler/run-now
  * Triggers a global multi-tenant optimization scan protected by advisory locks (Admin restricted).
  */
-router.get('/scheduler/run-now', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+router.post('/scheduler/run-now', authenticateToken, requireRole('ADMIN'), cloudMutationLimiter, async (req, res) => {
   try {
     console.log('[SCHEDULER] Manual optimization scan triggered via /api/scheduler/run-now');
     await runScheduledOptimization();
@@ -45,7 +46,7 @@ router.get('/scheduler/run-now', authenticateToken, requireRole('ADMIN'), async 
     return res.status(500).json({
       status: 'ERROR',
       message: 'Failed to execute manual optimization scan.',
-      details: error.message
+      details: 'Check server logs using the request ID for more information.'
     });
   }
 });

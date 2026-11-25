@@ -253,7 +253,9 @@ router.post('/login', async (req, res) => {
  */
 router.post('/refresh', async (req, res) => {
   try {
-    const refreshToken = (req.cookies && req.cookies.cloudpulse_refresh_token) || (req.body && req.body.refreshToken);
+    // Keep refresh tokens in the HttpOnly cookie only. Accepting a JSON body
+    // unnecessarily makes an otherwise protected long-lived token available to JS.
+    const refreshToken = req.cookies && req.cookies.cloudpulse_refresh_token;
 
     if (!refreshToken || typeof refreshToken !== 'string' || !refreshToken.trim()) {
       return res.status(401).json({ error: 'Invalid or expired refresh token' });
@@ -318,13 +320,26 @@ router.post('/refresh', async (req, res) => {
       return res.status(403).json({ error: 'Account is inactive or suspended' });
     }
 
-    // 6. Refresh Token Rotation: Revoke old refresh token in PostgreSQL
-    await db.query(
+    // 6. Atomically consume the old token. The revoked_at predicate prevents
+    // parallel refresh requests from both minting a new session.
+    const consumeRes = await db.query(
       `UPDATE refresh_tokens 
        SET revoked_at = CURRENT_TIMESTAMP 
-       WHERE id = $1`,
+       WHERE id = $1 AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+       RETURNING id`,
       [storedToken.id]
     );
+
+    if (consumeRes.rows.length === 0) {
+      console.warn(`[SECURITY-ALERT] Concurrent refresh token reuse detected for user ID '${storedToken.user_id}'. Revoking all active tokens.`);
+      await db.query(
+        `UPDATE refresh_tokens
+         SET revoked_at = CURRENT_TIMESTAMP
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [storedToken.user_id]
+      );
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
 
     // 7. Generate new Refresh Token & store hash in PostgreSQL
     const newRefreshToken = await generateAndStoreRefreshToken(user.id);
