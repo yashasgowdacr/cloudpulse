@@ -76,8 +76,37 @@ router.get('/api/cost/resource/:resourceGroup/:resourceName', (req, res) => res.
 router.get('/api/cost/vm-price/:resourceGroup/:vmName', ok({ vmSize: 'Standard_B2s', region: 'East US', hourlyPrice: 0.0416, currency: 'USD', priceUnit: '1 Hour', dataFound: true, source: 'Cloud pricing data' }));
 router.get('/api/cost/savings/:resourceGroup/:vmName', ok({ vmName: 'api-staging-01', resourceGroup: 'rg-staging', hourlyPrice: 0.0416, currency: 'USD', idle: true, potentialHourlySavings: 0.0416, potential30MinuteSavings: 0.0208, isEstimate: true, source: 'Cloud pricing data' }));
 
-router.get('/api/dashboard/kpis', ok({ totalCost: 1842.67, currency: 'USD', potentialSavings: 318.44, activeVms: 2, totalVms: 3, successfulActions: 1 }));
-router.get('/api/dashboard/trends', ok({ trends: [ { date: '2026-11-20', cost: 244.12 }, { date: '2026-11-21', cost: 251.44 }, { date: '2026-11-22', cost: 238.91 }, { date: '2026-11-23', cost: 269.12 }, { date: '2026-11-24', cost: 281.37 }, { date: '2026-11-25', cost: 276.88 } ] }));
+router.get('/api/dashboard/kpis', ok({ kpis: {
+  actualMonthToDateCost: 1842.67,
+  estimatedProjectedCost: 2211.20,
+  potentialMonthlySavings: 318.44,
+  estimatedAvoidedCost: 126.75,
+  currency: 'USD',
+  activeVmCount: 2,
+  idleVmCount: 1,
+  protectedVmCount: 1,
+  totalOptimizationActions: 1
+}, labels: {
+  actual: 'ACTUAL BILLED',
+  estimated: 'ESTIMATED PROJECTED',
+  potential: 'POTENTIAL SAVINGS',
+  avoided: 'ESTIMATED AVOIDED COST'
+} }));
+router.get('/api/dashboard/trends', ok({
+  dailyTrends: [
+    { date: '2026-11-20', cost: 244.12, currency: 'USD' },
+    { date: '2026-11-21', cost: 251.44, currency: 'USD' },
+    { date: '2026-11-22', cost: 238.91, currency: 'USD' },
+    { date: '2026-11-23', cost: 269.12, currency: 'USD' },
+    { date: '2026-11-24', cost: 281.37, currency: 'USD' },
+    { date: '2026-11-25', cost: 276.88, currency: 'USD' }
+  ],
+  byResourceGroup: [
+    { resourceGroup: 'rg-production', cost: 1034.18, currency: 'USD' },
+    { resourceGroup: 'rg-staging', cost: 512.49, currency: 'USD' },
+    { resourceGroup: 'rg-platform', cost: 296.00, currency: 'USD' }
+  ]
+}));
 router.get('/api/dashboard/savings-analytics', ok({ totalSavings: 318.44, monthlySavings: 318.44, savingsByDay: [ { date: '2026-11-24', amount: 12.48 } ], currency: 'USD' }));
 router.get('/api/actions', ok({ count: actions.length, actions }));
 router.get('/api/actions/:vmName', (req, res) => res.json({ vmName: req.params.vmName, count: actions.filter(a => a.vmName === req.params.vmName).length, actions: actions.filter(a => a.vmName === req.params.vmName) }));
