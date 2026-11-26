@@ -108,7 +108,7 @@ router.delete('/api/optimization-policy/scopes/:id', (req, res) => res.status(40
 
 router.post('/api/optimization/run-now', ok({ status: 'SUCCESS', message: 'Optimization scan completed.', scanned: 3, eligible: 1, protected: 1, skipped: 1 }));
 router.get('/api/scheduler/run-now', ok({ status: 'SUCCESS', message: 'Optimization scan completed.', scanned: 3, eligible: 1, protected: 1, skipped: 1 }));
-router.get('/api/notifications/test', ok({ success: true, provider: 'notification service', message: 'Test notification sent successfully.', recipient: 'user@cloudpulse.app' }));
+router.get('/api/notifications/test', ok({ success: true, provider: 'notification service', message: 'Test notification sent successfully.', recipient: 'cloudpulse.project@gmail.com' }));
 router.get('/api/admin/metrics', ok({ metrics: { totalTenants: 1, activeTenants: 1, totalAzureConnections: 1, totalOptimizationActions: actions.length, successfulDeallocations: 1, totalEstimatedAvoidedCost: 318.44, currency: 'USD' } }));
 router.get('/api/export/vms', (req, res) => res.type('text/csv').send('VM Name,Resource Group,Location,Power State\nweb-production-01,rg-production,East US,running\napi-staging-01,rg-staging,East US,running\nworker-dev-01,rg-development,Central US,deallocated\n'));
 router.get('/api/export/actions', (req, res) => res.type('text/csv').send('Timestamp (UTC),VM Name,Action,Status,CPU Average (%),Connection,Reason / Details\n2026-11-24T10:30:00.000Z,worker-dev-01,DEALLOCATE,SUCCESS,,Primary Cloud Subscription,Idle development VM\n'));

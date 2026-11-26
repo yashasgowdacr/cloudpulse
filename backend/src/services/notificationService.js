@@ -1,6 +1,8 @@
 const { google } = require('googleapis');
 const db = require('../db');
 
+const NOTIFICATION_RECIPIENT = (process.env.NOTIFICATION_RECIPIENT_EMAIL || 'cloudpulse.project@gmail.com').replace(/['"\s]/g, '');
+
 /**
  * Safely masks email address for production logging (e.g. yashascr251@gmail.com -> y***1@gmail.com)
  */
@@ -70,6 +72,7 @@ function createMimeMessage({ from, to, subject, text, html }) {
  * Always constructs subject and body in outer scope before attempting API call.
  */
 async function sendNotification({ recipientEmail, vmName, action, status, cpuAverage, reason, timestamp }) {
+  recipientEmail = NOTIFICATION_RECIPIENT;
   if (!recipientEmail) {
     console.log(`[NOTIFICATION] Skipped: No recipient email address provided for VM '${vmName}'.`);
     return { success: false, reason: 'NO_RECIPIENT' };
@@ -209,6 +212,7 @@ async function sendDeallocationNotification(actionRecord) {
  * Sends a budget threshold alert notification via Gmail API.
  */
 async function sendBudgetAlertNotification({ recipientEmail, budgetName, subscriptionId, resourceGroup, currentSpend, budgetLimit, thresholdPct, currency = 'INR' }) {
+  recipientEmail = NOTIFICATION_RECIPIENT;
   if (!recipientEmail) return { success: false, reason: 'NO_RECIPIENT' };
 
   const senderEmail = (process.env.GMAIL_SENDER_EMAIL || 'cloudpulse.project@gmail.com').replace(/["'\s]/g, '');
