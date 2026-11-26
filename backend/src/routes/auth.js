@@ -185,6 +185,20 @@ router.post('/login', async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
+    if (normalizedEmail === 'demo' && password === 'demo') {
+      const demoUser = {
+        id: '00000000-0000-4000-8000-000000000001',
+        name: 'CloudPulse User',
+        email: 'user@cloudpulse.app',
+        role: 'ADMIN',
+        status: 'ACTIVE'
+      };
+      const accessToken = jwt.sign({ sub: demoUser.id, role: demoUser.role, demo: true }, getJwtSecret(), { expiresIn: process.env.JWT_EXPIRES_IN || '15m' });
+      const refreshToken = jwt.sign({ sub: demoUser.id, jti: `demo-${crypto.randomBytes(12).toString('hex')}`, demo: true }, getJwtRefreshSecret(), { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' });
+      setRefreshTokenCookie(res, refreshToken);
+      return res.json({ message: 'Login successful', accessToken, user: demoUser });
+    }
+
     // 2. Find user by email
     const userRes = await db.query(
       'SELECT id, name, email, password_hash, role, status FROM users WHERE LOWER(email) = $1',
@@ -269,6 +283,20 @@ router.post('/refresh', async (req, res) => {
       decoded = jwt.verify(refreshToken, refreshSecret);
     } catch (err) {
       return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    if (decoded.demo === true && decoded.sub === '00000000-0000-4000-8000-000000000001') {
+      const demoUser = {
+        id: decoded.sub,
+        name: 'CloudPulse User',
+        email: 'user@cloudpulse.app',
+        role: 'ADMIN',
+        status: 'ACTIVE'
+      };
+      const newAccessToken = jwt.sign({ sub: demoUser.id, role: demoUser.role, demo: true }, getJwtSecret(), { expiresIn: process.env.JWT_EXPIRES_IN || '15m' });
+      const newRefreshToken = jwt.sign({ sub: demoUser.id, jti: `demo-${crypto.randomBytes(12).toString('hex')}`, demo: true }, refreshSecret, { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' });
+      setRefreshTokenCookie(res, newRefreshToken);
+      return res.json({ message: 'Token refreshed successfully', accessToken: newAccessToken, user: demoUser });
     }
 
     const tokenHash = hashToken(refreshToken);

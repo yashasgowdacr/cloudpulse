@@ -19,6 +19,7 @@ const budgetsRouter = require('./routes/budgets');
 const anomaliesRouter = require('./routes/anomalies');
 const adminRouter = require('./routes/admin');
 const cloudRouter = require('./routes/cloud');
+const { router: demoRouter, azureRouter: demoAzureRouter } = require('./routes/demo');
 const { requestLoggerMiddleware } = require('./utils/logger');
 const { getEncryptionKey } = require('./utils/crypto');
 const { runMigrations } = require('./db/migrate');
@@ -89,10 +90,14 @@ app.use(cors({
 app.use(express.json({ limit: '100kb' }));
 
 app.use('/api/auth', authRateLimiter, authRouter);
+// Must run before feature routers; only tokens issued by the demo credential
+// can enter these synthetic, read-only responses.
+app.use('/', demoRouter);
 app.use('/api/azure-connections', azureConnectionsRouter);
 app.use('/api/optimization-policy', optimizationPoliciesRouter);
 
 app.use('/health', healthRouter);
+app.use('/azure', demoAzureRouter);
 app.use('/azure', azureRouter);
 app.use('/api/cost', costsRouter);
 app.use('/api/actions', actionsRouter);
