@@ -83,10 +83,10 @@ const Login = () => {
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '1.25rem' }}>
           <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '0.375rem' }}>
-            Email Address
+            Email Address or Username
           </label>
           <input
-            type="email"
+            type="text"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="user@example.com"
