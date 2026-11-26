@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { publicErrorMessage } = require('../utils/http');
 const { getPolicyForUser, updatePolicyForUser } = require('../services/optimizationPolicyService');
 
 const router = express.Router();
@@ -13,7 +14,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'POLICY_FETCH_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve optimization policy.')
     });
   }
 });
@@ -30,7 +31,7 @@ router.put('/', authenticateToken, async (req, res) => {
     const status = error.statusCode || 400;
     return res.status(status).json({
       error: 'POLICY_UPDATE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to update optimization policy.')
     });
   }
 });
@@ -44,7 +45,7 @@ router.get('/scopes', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       error: 'SCOPES_FETCH_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve policy scopes.')
     });
   }
 });
@@ -61,7 +62,7 @@ router.post('/scopes', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 400).json({
       error: 'SCOPE_CREATE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to create policy scope.')
     });
   }
 });
@@ -78,7 +79,7 @@ router.put('/scopes/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 400).json({
       error: 'SCOPE_UPDATE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to update policy scope.')
     });
   }
 });
@@ -95,7 +96,7 @@ router.delete('/scopes/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 400).json({
       error: 'SCOPE_DELETE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to delete policy scope.')
     });
   }
 });
@@ -110,7 +111,7 @@ router.post('/resolve', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       error: 'POLICY_RESOLVE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to resolve optimization policy.')
     });
   }
 });

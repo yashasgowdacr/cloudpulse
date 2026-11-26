@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { publicErrorMessage } = require('../utils/http');
 const {
   createBudget,
   getBudgets,
@@ -22,7 +23,7 @@ router.get('/', authenticateToken, async (req, res) => {
     console.error('[BUDGETS] Error listing budgets:', error.message);
     return res.status(error.statusCode || 500).json({
       error: 'LIST_BUDGETS_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to list budgets.')
     });
   }
 });
@@ -42,7 +43,7 @@ router.post('/', authenticateToken, async (req, res) => {
     console.error('[BUDGETS] Error creating budget:', error.message);
     return res.status(error.statusCode || 500).json({
       error: 'CREATE_BUDGET_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to create budget.')
     });
   }
 });
@@ -58,7 +59,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       error: 'GET_BUDGET_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve budget.')
     });
   }
 });
@@ -77,7 +78,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       error: 'UPDATE_BUDGET_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to update budget.')
     });
   }
 });
@@ -96,7 +97,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       error: 'DELETE_BUDGET_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to delete budget.')
     });
   }
 });

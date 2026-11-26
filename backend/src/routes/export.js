@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { publicErrorMessage } = require('../utils/http');
 const {
   exportVmInventory,
   exportActionHistory,
@@ -24,7 +25,7 @@ router.get('/vms', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'VM_EXPORT_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to export virtual machines.')
     });
   }
 });
@@ -45,7 +46,7 @@ router.get('/actions', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'ACTIONS_EXPORT_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to export action history.')
     });
   }
 });
@@ -66,7 +67,7 @@ router.get('/costs', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'COSTS_EXPORT_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to export cost data.')
     });
   }
 });

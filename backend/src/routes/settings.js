@@ -9,6 +9,7 @@ const {
   addExclusionTag,
   deleteExclusionTag
 } = require('../services/settingsService');
+const { publicErrorMessage } = require('../utils/http');
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'SETTINGS_FETCH_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve account settings.')
     });
   }
 });
@@ -62,7 +63,7 @@ router.patch('/password', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'PASSWORD_CHANGE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to change password.')
     });
   }
 });
@@ -79,7 +80,7 @@ router.get('/notifications', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'NOTIFICATION_PREFS_FETCH_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve notification preferences.')
     });
   }
 });
@@ -99,7 +100,7 @@ router.patch('/notifications', authenticateToken, async (req, res) => {
     const status = error.statusCode || 400;
     return res.status(status).json({
       error: 'NOTIFICATION_PREFS_UPDATE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to update notification preferences.')
     });
   }
 });
@@ -116,7 +117,7 @@ router.get('/exclusion-tags', authenticateToken, async (req, res) => {
     const status = error.statusCode || 500;
     return res.status(status).json({
       error: 'EXCLUSION_TAGS_FETCH_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve exclusion tags.')
     });
   }
 });
@@ -136,7 +137,7 @@ router.post('/exclusion-tags', authenticateToken, async (req, res) => {
     const status = error.statusCode || 400;
     return res.status(status).json({
       error: 'EXCLUSION_TAG_CREATE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to create exclusion tag.')
     });
   }
 });
@@ -156,7 +157,7 @@ router.delete('/exclusion-tags/:id', authenticateToken, async (req, res) => {
     const status = error.statusCode || 400;
     return res.status(status).json({
       error: 'EXCLUSION_TAG_DELETE_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to delete exclusion tag.')
     });
   }
 });

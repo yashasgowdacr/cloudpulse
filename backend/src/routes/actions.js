@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const { getActions } = require('../services/actionHistoryService');
+const { publicErrorMessage } = require('../utils/http');
 
 const router = express.Router();
 
@@ -18,7 +19,7 @@ router.get('/', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       error: 'ACTIONS_FETCH_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve action history.')
     });
   }
 });
@@ -39,7 +40,7 @@ router.get('/:vmName', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       error: 'ACTIONS_FETCH_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve action history.')
     });
   }
 });

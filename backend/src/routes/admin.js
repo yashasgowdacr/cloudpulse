@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { publicErrorMessage } = require('../utils/http');
 const {
   getPlatformMetrics,
   listTenants,
@@ -24,7 +25,7 @@ router.get('/metrics', async (req, res) => {
     console.error('[ADMIN] Error fetching platform metrics:', error.message);
     return res.status(500).json({
       error: 'ADMIN_METRICS_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve admin metrics.')
     });
   }
 });
@@ -41,7 +42,7 @@ router.get('/tenants', async (req, res) => {
     console.error('[ADMIN] Error listing tenants:', error.message);
     return res.status(500).json({
       error: 'LIST_TENANTS_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to list tenants.')
     });
   }
 });
@@ -57,7 +58,7 @@ router.get('/tenants/:id', async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       error: 'TENANT_DETAILS_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to retrieve tenant details.')
     });
   }
 });
@@ -76,7 +77,7 @@ router.patch('/tenants/:id/status', async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 400).json({
       error: 'UPDATE_STATUS_FAILURE',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to update tenant status.')
     });
   }
 });

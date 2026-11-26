@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const { cloudReadLimiter, connectionValidationLimiter } = require('../middleware/rateLimit');
+const { publicErrorMessage } = require('../utils/http');
 const {
   createCloudConnection,
   getCloudConnections,
@@ -32,7 +33,7 @@ router.get('/connections', authenticateToken, async (req, res) => {
     console.error('[CLOUD-CONNECTIONS] Error listing connections:', error.message);
     return res.status(500).json({
       error: 'LIST_CLOUD_CONNECTIONS_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to list cloud connections.')
     });
   }
 });
@@ -71,7 +72,7 @@ router.delete('/connections/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       error: 'DELETE_CLOUD_CONNECTION_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to delete cloud connection.')
     });
   }
 });

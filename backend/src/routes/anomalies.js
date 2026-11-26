@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { publicErrorMessage } = require('../utils/http');
 const {
   getAnomalies,
   acknowledgeAnomaly,
@@ -22,7 +23,7 @@ router.get('/', authenticateToken, async (req, res) => {
     console.error('[ANOMALIES] Error listing anomalies:', error.message);
     return res.status(error.statusCode || 500).json({
       error: 'LIST_ANOMALIES_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to list cost anomalies.')
     });
   }
 });
@@ -42,7 +43,7 @@ router.post('/:id/acknowledge', authenticateToken, async (req, res) => {
     console.error('[ANOMALIES] Error acknowledging anomaly:', error.message);
     return res.status(error.statusCode || 500).json({
       error: 'ACKNOWLEDGE_ANOMALY_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Unable to acknowledge cost anomaly.')
     });
   }
 });

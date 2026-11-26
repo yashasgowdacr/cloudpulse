@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { cloudMutationLimiter } = require('../middleware/rateLimit');
+const { publicErrorMessage } = require('../utils/http');
 const { runScheduledOptimization, runManualOptimizationForUser } = require('../services/schedulerService');
 const { sendNotification } = require('../services/notificationService');
 
@@ -24,7 +25,7 @@ router.post('/optimization/run-now', authenticateToken, cloudMutationLimiter, as
     console.error('[MANUAL-OPTIMIZATION] Scan error:', error.message);
     return res.status(500).json({
       error: 'OPTIMIZATION_SCAN_FAILED',
-      message: error.message
+      message: publicErrorMessage(error, 'Optimization scan failed.')
     });
   }
 });

@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { publicErrorMessage } = require('../utils/http');
 const {
   getDashboardKpiMetrics,
   getCostTrends,
@@ -22,7 +23,7 @@ router.get('/kpis', authenticateToken, async (req, res) => {
     return res.status(500).json({
       error: 'DASHBOARD_KPIS_ERROR',
       message: 'Failed to retrieve dashboard KPI metrics',
-      details: error.message
+      details: publicErrorMessage(error, 'Dashboard KPI retrieval failed.')
     });
   }
 });
@@ -41,7 +42,7 @@ router.get('/trends', authenticateToken, async (req, res) => {
     return res.status(500).json({
       error: 'DASHBOARD_TRENDS_ERROR',
       message: 'Failed to retrieve cost trends',
-      details: error.message
+      details: publicErrorMessage(error, 'Dashboard trend retrieval failed.')
     });
   }
 });
@@ -60,7 +61,7 @@ router.get('/savings-analytics', authenticateToken, async (req, res) => {
     return res.status(500).json({
       error: 'SAVINGS_ANALYTICS_ERROR',
       message: 'Failed to retrieve savings analytics',
-      details: error.message
+      details: publicErrorMessage(error, 'Savings analytics retrieval failed.')
     });
   }
 });
